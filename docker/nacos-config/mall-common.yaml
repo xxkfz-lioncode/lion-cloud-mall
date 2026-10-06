@@ -1,0 +1,23 @@
+# Nacos 共享配置（dataId: mall-common.yaml，group: DEFAULT_GROUP）
+# 导入方式：Nacos 控制台 -> 配置管理 -> 配置列表 -> 新建配置
+# 不导入也不影响启动，各服务本地 application.yml 中已有完整默认配置。
+
+# Redis 配置（Sa-Token token 存储 + Redisson）
+spring:
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      password: lion123
+      database: 0
+
+# Sa-Token 配置：所有服务保持一致，实现 token 互通
+sa-token:
+  token-name: satoken
+  timeout: 86400
+  active-timeout: 1800
+  is-concurrent: true
+  is-share: true
+  token-style: uuid
+  is-read-header: true
+  is-read-body: false

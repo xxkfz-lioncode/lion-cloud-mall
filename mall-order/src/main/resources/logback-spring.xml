@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SkyWalking 日志上报配置（Logback）
+  ==========================================================================
+  1. CONSOLE：保留原有控制台输出（docker logs / IDEA 控制台都能看到）
+  2. SKYWALKING：通过 SkyWalking Agent 的 gRPC 通道把日志上报到 OAP，
+                 上报后才能在同版本 SkyWalking UI 的「Log」页签里查询
+  3. %tid：SkyWalking 提供的 traceId 占位符，把日志和链路绑定，
+           Trace 详情页可以直接跳到对应日志
+
+  依赖：pom.xml 中的 apm-toolkit-logback-1.x（版本须与 Agent 版本一致）
+  注意：上报能力依赖 -javaagent 挂载 SkyWalking Agent；
+       未挂 Agent 时（例如本地不挂 agent 裸跑）只会打印一行告警，不影响启动。
+  ==========================================================================
+-->
+<configuration>
+    <!-- 日志格式：[traceId] 便于链路与日志互查 -->
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%tid] %logger{36} - %msg%n"/>
+
+    <!-- 控制台输出：带 traceId -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
+            <layout class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.TraceIdPatternLogbackLayout">
+                <pattern>${LOG_PATTERN}</pattern>
+            </layout>
+        </encoder>
+    </appender>
+
+    <!-- 上报 SkyWalking OAP（gRPC，地址复用 Agent 的 collector.backend_service） -->
+    <appender name="SKYWALKING"
+              class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.log.GRPCLogClientAppender">
+        <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
+            <layout class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.TraceIdPatternLogbackLayout">
+                <pattern>${LOG_PATTERN}</pattern>
+            </layout>
+        </encoder>
+    </appender>
+
+    <!-- 框架/中间件日志只进控制台，避免刷爆 OAP（9.7 默认 H2 存储，容量有限） -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <!-- 业务日志：控制台 + 上报 OAP（additivity 默认为 true，会同时命中 root 的 CONSOLE） -->
+    <logger name="com.lion.mall" level="INFO">
+        <appender-ref ref="SKYWALKING"/>
+    </logger>
+</configuration>

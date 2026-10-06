@@ -1,0 +1,21 @@
+# 引导配置：先于 application.yml 加载，用于从 Nacos 配置中心拉取配置
+spring:
+  application:
+    name: mall-user
+  cloud:
+    nacos:
+      # 注册中心 & 配置中心地址
+      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      username: ${NACOS_USER:nacos}
+      password: ${NACOS_PWD:nacos}
+      discovery:
+        # 注册到 Nacos 的服务名（默认取 spring.application.name）
+        service: mall-user
+      config:
+        file-extension: yaml
+        refresh-enabled: true
+        # 共享配置：所有服务通用的配置（Redis、Sa-Token 等）
+        shared-configs:
+          - data-id: mall-common.yaml
+            group: DEFAULT_GROUP
+            refresh: true

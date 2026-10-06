@@ -1,0 +1,63 @@
+/* 全局样式 */
+:root {
+  --lm-primary: #4f46e5;
+  --lm-primary-light: #6366f1;
+  --lm-bg: #f5f7fb;
+  --lm-radius: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--lm-bg);
+  color: #1f2937;
+  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.page-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+/* 卡片统一样式 */
+.lm-card {
+  background: #fff;
+  border-radius: var(--lm-radius);
+  box-shadow: 0 6px 20px rgba(31, 41, 55, 0.06);
+}
+
+/* 渐变按钮 */
+.lm-gradient-btn {
+  background: linear-gradient(135deg, var(--lm-primary), var(--lm-primary-light));
+  border: none;
+  color: #fff;
+}
+
+.lm-gradient-btn:hover {
+  background: linear-gradient(135deg, var(--lm-primary-light), var(--lm-primary));
+  color: #fff;
+}
+
+/* 价格 */
+.lm-price {
+  color: #ef4444;
+  font-weight: 700;
+}
+
+/* 页面标题 */
+.lm-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 16px;
+}

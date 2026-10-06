@@ -1,0 +1,254 @@
+# ============================================================
+# lion-cloud-mall 一键编排
+# 使用方式：
+#   1) 先打包：mvn -DskipTests clean package
+#   2) 再启动：docker compose up -d --build
+#   3) 查看日志：docker compose logs -f mall-gateway
+# ============================================================
+
+services:
+  # ---------------- 基础设施 ----------------
+  mysql:
+    image: mysql:8.0
+    container_name: mall-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      TZ: Asia/Shanghai
+    ports:
+      # 宿主机 3306 已被本机 MySQL 占用，映射到 3307（容器内仍是 3306）
+      - "3307:3306"
+    volumes:
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mall-net
+
+  redis:
+    image: redis:7.2
+    container_name: mall-redis
+    command: ["redis-server", "--requirepass", "lion123", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "lion123", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mall-net
+
+  nacos:
+    image: nacos/nacos-server:v2.3.2
+    container_name: mall-nacos
+    environment:
+      MODE: standalone
+      TZ: Asia/Shanghai
+      # 数据存储：外置 MySQL 持久化（建表脚本见 docker/mysql/init/02-nacos-schema.sql）
+      SPRING_DATASOURCE_PLATFORM: mysql
+      MYSQL_SERVICE_HOST: mysql
+      MYSQL_SERVICE_PORT: 3306           # 容器内端口，不是宿主机的 3307
+      MYSQL_SERVICE_DB_NAME: nacos_config
+      MYSQL_SERVICE_USER: root
+      MYSQL_SERVICE_PASSWORD: root
+      MYSQL_DATABASE_NUM: 1
+      MYSQL_SERVICE_DB_PARAM: characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      # Nacos 2.2+ 鉴权相关必填项（默认登录账号：nacos / nacos）
+      NACOS_AUTH_TOKEN: U2VjcmV0S2V5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkw
+      NACOS_AUTH_IDENTITY_KEY: serverIdentity
+      NACOS_AUTH_IDENTITY_VALUE: security
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+      - "9849:9849"
+    volumes:
+      - nacos-data:/home/nacos/data
+    networks:
+      - mall-net
+
+  # ---------------- 微服务 ----------------
+  mall-gateway:
+    build:
+      context: ./mall-gateway
+      dockerfile: Dockerfile
+    image: lion/mall-gateway:1.0.0
+    container_name: mall-gateway
+    environment:
+      NACOS_ADDR: nacos:8848
+      REDIS_HOST: redis
+      REDIS_PWD: lion123
+      # SkyWalking Agent 上报地址：容器网络内用服务名，不能用 Dockerfile 里的默认值 oap:11800
+      SW_AGENT_COLLECTOR_BACKEND_SERVICES: skywalking-oap:11800
+    volumes:
+      # SkyWalking Agent：需先执行 docker/skywalking/download-agent.ps1 下载，
+      # 未下载时会自动跳过 javaagent，不影响启动
+      - ./docker/skywalking/agent:/skywalking/agent:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      - nacos
+      - redis
+      - skywalking-oap
+    restart: unless-stopped
+    networks:
+      - mall-net
+
+  mall-user:
+    build:
+      context: ./mall-user
+      dockerfile: Dockerfile
+    image: lion/mall-user:1.0.0
+    container_name: mall-user
+    environment:
+      NACOS_ADDR: nacos:8848
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306          # 容器网络内使用 MySQL 容器自身端口
+      MYSQL_PWD: root
+      REDIS_HOST: redis
+      REDIS_PWD: lion123
+      SW_AGENT_COLLECTOR_BACKEND_SERVICES: skywalking-oap:11800
+    volumes:
+      - ./docker/skywalking/agent:/skywalking/agent:ro
+    ports:
+      - "8101:8101"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+      skywalking-oap:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - mall-net
+
+  mall-product:
+    build:
+      context: ./mall-product
+      dockerfile: Dockerfile
+    image: lion/mall-product:1.0.0
+    container_name: mall-product
+    environment:
+      NACOS_ADDR: nacos:8848
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306          # 容器网络内使用 MySQL 容器自身端口
+      MYSQL_PWD: root
+      REDIS_HOST: redis
+      REDIS_PWD: lion123
+      SW_AGENT_COLLECTOR_BACKEND_SERVICES: skywalking-oap:11800
+    volumes:
+      - ./docker/skywalking/agent:/skywalking/agent:ro
+    ports:
+      - "8102:8102"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+      skywalking-oap:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - mall-net
+
+  mall-order:
+    build:
+      context: ./mall-order
+      dockerfile: Dockerfile
+    image: lion/mall-order:1.0.0
+    container_name: mall-order
+    environment:
+      NACOS_ADDR: nacos:8848
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306          # 容器网络内使用 MySQL 容器自身端口
+      MYSQL_PWD: root
+      REDIS_HOST: redis
+      REDIS_PWD: lion123
+      SW_AGENT_COLLECTOR_BACKEND_SERVICES: skywalking-oap:11800
+    volumes:
+      - ./docker/skywalking/agent:/skywalking/agent:ro
+    ports:
+      - "8103:8103"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+      skywalking-oap:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - mall-net
+
+  # ---------------- 前端 ----------------
+  mall-frontend:
+    build:
+      context: ./mall-frontend
+      dockerfile: Dockerfile
+    image: lion/mall-frontend:1.0.0
+    container_name: mall-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - mall-gateway
+    restart: unless-stopped
+    networks:
+      - mall-net
+
+  # ---------------- SkyWalking（APM：链路追踪 + 服务拓扑 + 性能指标） ----------------
+  # 版本 9.7.0，存储为内置 H2，无需 Elasticsearch / BanyanDB。
+  # 注意：10.2.0 起官方默认存储改为 BanyanDB，升级版本需一并调整 SW_STORAGE。
+  skywalking-oap:
+    image: apache/skywalking-oap-server:9.7.0
+    container_name: mall-skywalking-oap
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      SW_STORAGE: h2
+      JAVA_OPTS: "-Xms512m -Xmx1024m"
+    ports:
+      - "11800:11800"   # gRPC：Java Agent 上报
+      - "12800:12800"   # HTTP：UI 的查询接口
+    volumes:
+      - skywalking-data:/skywalking/h2-data
+    networks:
+      - mall-net
+
+  skywalking-ui:
+    image: apache/skywalking-ui:9.7.0
+    container_name: mall-skywalking-ui
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      SW_OAP_ADDRESS: http://skywalking-oap:12800
+    depends_on:
+      - skywalking-oap
+    ports:
+      - "8081:8080"     # 控制台页面（80 已给前端，网关在 8080）
+    networks:
+      - mall-net
+
+networks:
+  mall-net:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:
+  nacos-data:
+  skywalking-data:

@@ -1,0 +1,15 @@
+# 网关专属配置（dataId: mall-gateway.yaml，group: DEFAULT_GROUP）
+# 演示「配置中心动态下发路由/日志级别」的用法，可与本地 application.yml 互补。
+
+spring:
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+
+logging:
+  level:
+    org.springframework.cloud.gateway: info
+    com.lion.mall: info

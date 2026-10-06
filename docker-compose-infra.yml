@@ -1,0 +1,143 @@
+# ============================================================
+# 本地开发基础设施：MySQL 8 + Redis 7 + Nacos 2.3.2 + SkyWalking 9.7.0（APM）
+# 适用于 Windows + Docker Desktop（WSL2 后端）
+#
+# 常用命令（在 docker-compose-infra.yml 所在目录执行）：
+#   启动：   docker compose -f docker-compose-infra.yml up -d
+#   看状态： docker compose -f docker-compose-infra.yml ps
+#   看日志： docker compose -f docker-compose-infra.yml logs -f nacos
+#   停止：   docker compose -f docker-compose-infra.yml stop
+#   删除：   docker compose -f docker-compose-infra.yml down
+#   重置：   docker compose -f docker-compose-infra.yml down -v   （连数据一起清空）
+#
+# 注意：本文件只包含基础设施，不要与根目录 docker-compose.yml（全栈编排）同时启动，
+#      否则 3306 / 6379 / 8848 端口会冲突。
+# ============================================================
+
+services:
+  # ---------------- MySQL 8 ----------------
+  mysql:
+    image: mysql:8.0
+    container_name: mall-mysql
+    restart: unless-stopped
+    ports:
+      # 宿主机已装 MySQL 占用了 3306，这里映射到 3307（容器内仍是 3306）
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root          # root 密码，对应服务配置 ${MYSQL_PWD:root}
+      TZ: Asia/Shanghai
+      LANG: C.UTF-8
+    command:
+      # 字符集与时区（Windows 下避免中文乱码）
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_general_ci
+      --default-time-zone=+08:00
+    volumes:
+      # 首次启动自动执行建库建表脚本（仅在数据卷为空时执行）
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mall-infra
+
+  # ---------------- Redis 7 ----------------
+  redis:
+    image: redis:7.2
+    container_name: mall-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--requirepass", "lion123", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "lion123", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mall-infra
+
+  # ---------------- Nacos 2.3.2（注册中心 + 配置中心） ----------------
+  nacos:
+    image: nacos/nacos-server:v2.3.2
+    container_name: mall-nacos
+    restart: unless-stopped
+    environment:
+      MODE: standalone                   # 单机模式
+      TZ: Asia/Shanghai
+      # ---------- 数据存储：MySQL（默认改为外置 MySQL 持久化） ----------
+      SPRING_DATASOURCE_PLATFORM: mysql
+      MYSQL_SERVICE_HOST: mysql          # 容器网络内的服务名
+      MYSQL_SERVICE_PORT: 3306           # 容器内端口（不是宿主机的 3307）
+      MYSQL_SERVICE_DB_NAME: nacos_config
+      MYSQL_SERVICE_USER: root
+      MYSQL_SERVICE_PASSWORD: root
+      MYSQL_DATABASE_NUM: 1
+      MYSQL_SERVICE_DB_PARAM: characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      # Nacos 2.2+ 鉴权必填项，默认控制台账号密码：nacos / nacos
+      NACOS_AUTH_TOKEN: U2VjcmV0S2V5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkw
+      NACOS_AUTH_IDENTITY_KEY: serverIdentity
+      NACOS_AUTH_IDENTITY_VALUE: security
+      # JVM 调小一点，Windows 上更省内存
+      JVM_XMS: 512m
+      JVM_XMX: 512m
+      JVM_XMN: 256m
+    depends_on:
+      mysql:
+        condition: service_healthy       # 等 MySQL 就绪再启动，避免连库失败
+    ports:
+      - "8848:8848"   # 控制台 / HTTP API
+      - "9848:9848"   # gRPC：客户端（Java 服务）注册、配置监听走这个端口
+      - "9849:9849"   # gRPC：服务端间通信
+    volumes:
+      - nacos-data:/home/nacos/data
+    networks:
+      - mall-infra
+
+  # ---------------- SkyWalking（APM：链路追踪 + 服务拓扑 + 性能指标） ----------------
+  # 版本说明：使用 9.7.0，存储为内置 H2，不需要额外的 Elasticsearch / BanyanDB。
+  # 注意：10.2.0 起官方默认存储改为 BanyanDB，若要升级版本需一并调整 SW_STORAGE。
+  skywalking-oap:
+    image: apache/skywalking-oap-server:9.7.0
+    container_name: mall-skywalking-oap
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      SW_STORAGE: h2                 # 内置 H2，本地学习足够；生产建议换 Elasticsearch
+      JAVA_OPTS: "-Xms512m -Xmx1024m"
+    ports:
+      - "11800:11800"                # gRPC：Java Agent 上报
+      - "12800:12800"                # HTTP：UI 的查询接口
+    volumes:
+      - skywalking-data:/skywalking/h2-data
+    networks:
+      - mall-infra
+
+  skywalking-ui:
+    image: apache/skywalking-ui:9.7.0
+    container_name: mall-skywalking-ui
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      SW_OAP_ADDRESS: http://skywalking-oap:12800
+    depends_on:
+      - skywalking-oap
+    ports:
+      - "8081:8080"                  # 控制台页面（本机 8080 已被网关占用）
+    networks:
+      - mall-infra
+
+networks:
+  mall-infra:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:
+  nacos-data:
+  skywalking-data:

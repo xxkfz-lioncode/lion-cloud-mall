@@ -1,0 +1,60 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: mall-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PWD:lion123}
+      database: 0
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+    gateway:
+      # 开启根据服务名自动创建路由（lb://mall-user 形式依赖该能力）
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      # 全局过滤器：去掉 /api 前缀后转发到具体服务
+      default-filters:
+        - DedupeResponseHeader=Vary Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_UNIQUE
+      routes:
+        - id: mall-user
+          uri: lb://mall-user
+          predicates:
+            - Path=/api/user/**
+          filters:
+            - StripPrefix=1
+        - id: mall-product
+          uri: lb://mall-product
+          predicates:
+            - Path=/api/product/**
+          filters:
+            - StripPrefix=1
+        - id: mall-order
+          uri: lb://mall-order
+          predicates:
+            - Path=/api/order/**
+          filters:
+            - StripPrefix=1
+
+# Sa-Token 配置（与各业务服务保持一致，保证 token 互通）
+sa-token:
+  token-name: satoken
+  timeout: 86400
+  active-timeout: 1800
+  is-concurrent: true
+  is-share: true
+  token-style: uuid
+  is-read-header: true
+  is-read-body: false
+
+# 网关日志：可观察路由转发情况
+logging:
+  level:
+    org.springframework.cloud.gateway: info

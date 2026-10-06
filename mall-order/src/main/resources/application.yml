@@ -1,0 +1,62 @@
+server:
+  port: 8103
+
+spring:
+  application:
+    name: mall-order
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # 默认走宿主机映射端口 3307（本机已占用 3306）；容器内部署时由 MYSQL_PORT=3306 覆盖
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3307}/mall_order?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PWD:root}
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PWD:lion123}
+      database: 0
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+    openfeign:
+      # 负载均衡由 Spring Cloud LoadBalancer 提供（引入 starter 后默认生效）
+      # 熔断降级：默认关闭；引入 spring-cloud-starter-circuitbreaker-resilience4j
+      # 并将此处改为 true，即可启用 @FeignClient 的 fallbackFactory 降级逻辑
+      circuitbreaker:
+        enabled: false
+      client:
+        config:
+          default:
+            connect-timeout: 3000    # 连接超时（ms）
+            read-timeout: 5000       # 读取超时（ms）
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
+
+sa-token:
+  token-name: satoken
+  timeout: 86400
+  active-timeout: 1800
+  is-concurrent: true
+  is-share: true
+  token-style: uuid
+  is-read-header: true
+  is-read-body: false
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+
+logging:
+  level:
+    com.lion.mall: debug
