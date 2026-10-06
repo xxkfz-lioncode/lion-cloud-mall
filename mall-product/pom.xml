@@ -89,6 +89,12 @@
             <groupId>org.apache.skywalking</groupId>
             <artifactId>apm-toolkit-logback-1.x</artifactId>
         </dependency>
+
+        <!-- Seata 分布式事务（AT 模式），版本由 Spring Cloud Alibaba BOM 锁定为 2.0.0 -->
+        <dependency>
+            <groupId>io.seata</groupId>
+            <artifactId>seata-spring-boot-starter</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

@@ -23,6 +23,7 @@
 | 接口文档 | SpringDoc（OpenAPI 3 / Swagger） | 在线接口文档 |
 | 前端 | Vue3 + Vite + Element Plus + Pinia | 商城页面 |
 | 链路追踪 | Apache SkyWalking 9.7.0 + Java Agent | APM：链路追踪、服务拓扑、性能指标 |
+| 分布式事务 | Seata 2.0.0（AT 模式） | 下单跨服务一致性：订单回滚时库存一并回滚 |
 | 部署 | Docker + Docker Compose | 一键编排启动 |
 
 ---
@@ -346,3 +347,75 @@ Java Agent 只上报**链路 + 指标**，业务日志必须由应用主动上�
 3. `%tid` 依赖 Agent：不挂 agent 裸跑时该位置为空占位符，属正常现象，不影响启动。
 4. 查看方式：UI 左侧 **Log** → 服务选 `mall-order` → 选时间范围 → 可再填 `traceId`
    或关键字。下单一单后应能看到「下单成功」「扣减库存成功」等记录。
+
+---
+
+## 九、Seata 分布式事务（AT 模式）
+
+下单要写 `mall_order`（订单库）并远程扣 `mall_product`（商品库）库存，
+这是典型的**跨服务、跨库写**，本地 `@Transactional` 管不到商品服务，需要分布式事务。
+
+### 9.1 角色与版本
+
+| 角色 | 服务 | 说明 |
+| --- | --- | --- |
+| TC（事务协调者） | `seata-server` 容器 | 维护全局事务与分支事务状态，决定提交/回滚 |
+| TM（事务管理器） | `mall-order` | `@GlobalTransactional` 标注处，开启全局事务 |
+| RM（资源管理器） | `mall-order`、`mall-product`、`mall-user` | 各自本地分支事务，向 TC 注册分支 |
+
+版本：**客户端与服务端统一 2.0.0**。该版本由 Spring Cloud Alibaba 2023.0.1.0 的 BOM
+锁定（`spring-cloud-alibaba-dependencies` 里 `seata.version=2.0.0`），
+所以 pom 里引 `io.seata:seata-spring-boot-starter` **不需要写版本**，镜像也用
+`seataio/seata-server:2.0.0`，两者必须同版本。
+
+### 9.2 改动清单（已落地）
+
+| 位置 | 改动 |
+| --- | --- |
+| `docker-compose.yml` / `docker-compose-infra.yml` | 新增 `seata-server` 服务（8091 业务端口 / 7091 控制台），业务服务 `depends_on` 它 |
+| `docker/seata/application.yml` | TC 配置：注册中心 Nacos、配置 file、存储 file |
+| `docker/mysql/init/01-schema.sql` | 三个业务库各建 `undo_log`（AT 模式回滚日志表） |
+| `mall-api` / `mall-user` / `mall-product` / `mall-order` pom | 引入 `seata-spring-boot-starter` |
+| 三个服务 `application.yml` | `seata.*` 配置（事务分组 `mall_tx_group`、Nacos 注册中心、AT 代理） |
+| `FeignConfig` | 新增 `seataXidInterceptor()`，透传 `TX_XID` 请求头 |
+| `OrderServiceImpl#create` | 加 `@GlobalTransactional(name = "create-order", rollbackFor = Exception.class)` |
+
+### 9.3 XID 透传（最关键）
+
+`mall-order` 开启全局事务后，TC 会生成 XID。Feign 调用商品服务时**必须**把 XID 带过去，
+否则商品服务不知道自己属于这个全局事务，结果是「订单回滚了、库存却扣了」：
+
+```java
+template.header(RootContext.KEY_XID, RootContext.getXID());   // 请求头 TX_XID
+```
+
+### 9.4 启动与验证
+
+```powershell
+bin\start-all.bat
+```
+
+1. Nacos 控制台（http://localhost:8848/nacos）→ 服务列表应能看到 `seata-server`。
+2. Seata 控制台：http://localhost:7091（账号 `seata` / `seata`）。
+3. 下单一单，日志里应出现：
+   - `mall-order`：`Begin new global transaction [...]` / `global transaction ... will be committed`
+   - `mall-product`：`branch register success` / `Branch Session rollback`
+4. 故意让下单失败（例如在 `OrderServiceImpl#create` 末尾临时 `throw new RuntimeException()`），
+   检查 `t_order` 没新增 **且** `t_product.stock` 回滚 → 说明全局事务生效。
+
+### 9.5 常见坑
+
+1. **版本必须对齐**：客户端 2.0.0 ↔ 服务端 2.0.0，不要单独升级其中一个。
+2. **`undo_log` 必须每个写库都建**：缺表会报 `Table 'xxx.undo_log' doesn't exist`。
+   已初始化过数据卷的库不会重跑建表脚本，需手动执行或 `bin\reset.bat` 重建。
+3. **`SEATA_IP` 要选对**：
+   - 全容器化（`docker-compose.yml`）：`SEATA_IP: seata-server`，容器内用服务名访问；
+   - 服务在 IDEA 里跑（`docker-compose-infra.yml`）：`SEATA_IP: 127.0.0.1`，宿主机直连。
+   如果两边混用，把 `SEATA_IP` 改成**宿主机局域网 IP**（如 `192.168.1.100`）即可同时连通。
+4. **数据源代理**：本项目单数据源 + HikariCP，Seata 会自动代理；若以后上多数据源，
+   需要手动包 `io.seata.rm.datasource.DataSourceProxy`。
+5. **隔离级别**：AT 默认全局「读未提交」；`ProductServiceImpl#deductStock` 里的 Redisson 锁
+   在分支提交前释放，学习演示无碍，生产严谨场景建议加锁上移或改用 `@GlobalLock`。
+6. **TC 存储**：当前 `store.mode=file`，TC 重启会丢事务日志。想持久化改成 `db`：
+   建 `seata` 库并按官方 `script/server/db/mysql.sql` 建 `global_table` / `branch_table` /
+   `lock_table`，再在 `docker/seata/application.yml` 里配 `seata.store.db` 的连接信息。

@@ -75,6 +75,33 @@ services:
     networks:
       - mall-net
 
+  # ---------------- Seata Server（TC：分布式事务协调者） ----------------
+  # 版本与客户端一致（Spring Cloud Alibaba 2023.0.1.0 锁定 seata 2.0.0）
+  # 控制台：http://localhost:7091  账号 seata / seata
+  seata-server:
+    image: seataio/seata-server:2.0.0
+    container_name: mall-seata
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      # 注册到 Nacos 的 TC 地址，按运行方式二选一：
+      #   全容器化（bin\start-all.bat 起 4 个服务）→ 可填 seata-server（容器内按服务名访问）
+      #   服务在 IDEA/宿主机跑 → 必须填宿主机局域网 IP（ipconfig 查看），
+      #                          否则注册出去的是容器内网 IP（如 172.20.0.4），宿主机连不上
+      #   混用（服务和容器同时在跑）→ 填宿主机局域网 IP，两边都能连通
+      SEATA_IP: 192.168.0.105
+      SEATA_PORT: 8091
+    ports:
+      - "8091:8091"   # RM / TM 连接 TC
+      - "7091:7091"   # Seata 控制台
+    volumes:
+      - ./docker/seata/application.yml:/seata-server/resources/application.yml
+    depends_on:
+      nacos:
+        condition: service_started
+    networks:
+      - mall-net
+
   # ---------------- 微服务 ----------------
   mall-gateway:
     build:
@@ -88,10 +115,14 @@ services:
       REDIS_PWD: lion123
       # SkyWalking Agent 上报地址：容器网络内用服务名，不能用 Dockerfile 里的默认值 oap:11800
       SW_AGENT_COLLECTOR_BACKEND_SERVICES: skywalking-oap:11800
+      # 日志文件落盘目录（见各服务 logback-spring.xml）
+      LOG_PATH: /app/logs
     volumes:
       # SkyWalking Agent：需先执行 docker/skywalking/download-agent.ps1 下载，
       # 未下载时会自动跳过 javaagent，不影响启动
       - ./docker/skywalking/agent:/skywalking/agent:ro
+      # 日志挂卷：落到宿主机 ./logs（不挂的话写进容器可写层，容器重建即丢失）
+      - ./logs:/app/logs
     ports:
       - "8080:8080"
     depends_on:
@@ -116,8 +147,12 @@ services:
       REDIS_HOST: redis
       REDIS_PWD: lion123
       SW_AGENT_COLLECTOR_BACKEND_SERVICES: skywalking-oap:11800
+      # 日志文件落盘目录（见各服务 logback-spring.xml）
+      LOG_PATH: /app/logs
     volumes:
       - ./docker/skywalking/agent:/skywalking/agent:ro
+      # 日志挂卷：落到宿主机 ./logs（不挂的话写进容器可写层，容器重建即丢失）
+      - ./logs:/app/logs
     ports:
       - "8101:8101"
     depends_on:
@@ -128,6 +163,8 @@ services:
       nacos:
         condition: service_started
       skywalking-oap:
+        condition: service_started
+      seata-server:
         condition: service_started
     restart: unless-stopped
     networks:
@@ -147,8 +184,12 @@ services:
       REDIS_HOST: redis
       REDIS_PWD: lion123
       SW_AGENT_COLLECTOR_BACKEND_SERVICES: skywalking-oap:11800
+      # 日志文件落盘目录（见各服务 logback-spring.xml）
+      LOG_PATH: /app/logs
     volumes:
       - ./docker/skywalking/agent:/skywalking/agent:ro
+      # 日志挂卷：落到宿主机 ./logs（不挂的话写进容器可写层，容器重建即丢失）
+      - ./logs:/app/logs
     ports:
       - "8102:8102"
     depends_on:
@@ -159,6 +200,8 @@ services:
       nacos:
         condition: service_started
       skywalking-oap:
+        condition: service_started
+      seata-server:
         condition: service_started
     restart: unless-stopped
     networks:
@@ -178,8 +221,12 @@ services:
       REDIS_HOST: redis
       REDIS_PWD: lion123
       SW_AGENT_COLLECTOR_BACKEND_SERVICES: skywalking-oap:11800
+      # 日志文件落盘目录（见各服务 logback-spring.xml）
+      LOG_PATH: /app/logs
     volumes:
       - ./docker/skywalking/agent:/skywalking/agent:ro
+      # 日志挂卷：落到宿主机 ./logs（不挂的话写进容器可写层，容器重建即丢失）
+      - ./logs:/app/logs
     ports:
       - "8103:8103"
     depends_on:
@@ -190,6 +237,8 @@ services:
       nacos:
         condition: service_started
       skywalking-oap:
+        condition: service_started
+      seata-server:
         condition: service_started
     restart: unless-stopped
     networks:

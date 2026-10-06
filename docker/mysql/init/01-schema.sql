@@ -109,6 +109,32 @@ CREATE TABLE t_order
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='订单表';
 
+-- ---------------------------- Seata AT 模式回滚日志 ----------------------------
+-- 说明：AT 模式下每个「参与全局事务、且会写库」的库都必须有 undo_log，
+--      用于全局回滚时生成反向 SQL。这里在 mall_order 建一次，再用 LIKE 复制给另外两个库。
+USE mall_order;
+
+CREATE TABLE IF NOT EXISTS `undo_log`
+(
+    id            BIGINT(20)   NOT NULL AUTO_INCREMENT,
+    branch_id     BIGINT(20)   NOT NULL,
+    xid           VARCHAR(100) NOT NULL,
+    context       VARCHAR(128) NOT NULL,
+    rollback_info LONGBLOB     NOT NULL,
+    log_status    INT(11)      NOT NULL,
+    log_created   DATETIME     NOT NULL,
+    log_modified  DATETIME     NOT NULL,
+    ext           VARCHAR(100) DEFAULT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY ux_undo_log (xid, branch_id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='Seata AT 模式回滚日志表';
+
+CREATE TABLE IF NOT EXISTS mall_product.undo_log LIKE mall_order.undo_log;
+CREATE TABLE IF NOT EXISTS mall_user.undo_log LIKE mall_order.undo_log;
+
+USE mall_order;
+
 DROP TABLE IF EXISTS t_order_item;
 CREATE TABLE t_order_item
 (

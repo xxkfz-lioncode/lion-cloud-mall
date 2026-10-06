@@ -1,0 +1,54 @@
+# ============================================================
+# Seata Server（TC）配置
+# 挂载到容器 /seata-server/resources/application.yml
+#
+# 说明：
+#   registry.type=nacos：TC 注册到 Nacos，客户端通过 Nacos 发现 TC
+#   config.type=file   ：配置直接读本文件，省掉往 Nacos 推 config.txt 的步骤
+#   store.mode=file    ：事务日志存本地文件（学习用；TC 重启会丢失）
+#                        想持久化改成 db，见 README「分布式事务」
+# ============================================================
+server:
+  port: 7091
+
+spring:
+  application:
+    name: seata-server
+
+logging:
+  config: classpath:logback-spring.xml
+  file:
+    # seata-server 的 ServerRunner / logback 会读取该占位符，必须存在
+    # 镜像 JVM 参数已带 -Dlog.home=/root/logs/seata
+    path: ${log.home:/root/logs/seata}
+
+console:
+  user:
+    username: seata
+    password: seata
+
+seata:
+  # ---------- 注册中心：Nacos ----------
+  registry:
+    type: nacos
+    nacos:
+      application: seata-server        # 客户端 seata.registry.nacos.application 要与此一致
+      server-addr: nacos:8848          # docker-compose-infra.yml 中改为 nacos:8848 亦可（同一网络）
+      group: SEATA_GROUP
+      namespace: ""
+      username: nacos
+      password: nacos
+      cluster: default                 # 与客户端 vgroup-mapping 的目标集群名一致
+
+  # ---------- 配置中心：本地文件 ----------
+  config:
+    type: file
+
+  # ---------- 事务日志存储 ----------
+  store:
+    mode: file
+
+  # ---------- 控制台鉴权 ----------
+  security:
+    secretKey: SeataSecretKey0c382ef121d778043159209298fd40bf3850a017
+    tokenValidityInMilliseconds: 1800000

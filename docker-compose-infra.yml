@@ -132,6 +132,27 @@ services:
     networks:
       - mall-infra
 
+  # ---------------- Seata Server 2.0.0（TC：分布式事务协调者） ----------------
+  # 仅起基础设施时用这份配置：服务在 IDEA 里跑，TC 地址注册为 127.0.0.1，宿主机可直连
+  seata-server:
+    image: seataio/seata-server:2.0.0
+    container_name: mall-seata
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      SEATA_IP: 127.0.0.1              # 宿主机会直连这个地址，不要改成服务名
+      SEATA_PORT: 8091
+    ports:
+      - "8091:8091"   # RM / TM 连接 TC
+      - "7091:7091"   # Seata 控制台（seata / seata）
+    volumes:
+      - ./docker/seata/application.yml:/seata-server/resources/application.yml
+    depends_on:
+      nacos:
+        condition: service_started
+    networks:
+      - mall-infra
+
 networks:
   mall-infra:
     driver: bridge

@@ -22,6 +22,7 @@ import com.lion.mall.order.model.req.CreateOrderReq;
 import com.lion.mall.order.model.vo.OrderItemVO;
 import com.lion.mall.order.model.vo.OrderVO;
 import com.lion.mall.order.service.OrderService;
+import io.seata.spring.annotation.GlobalTransactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -52,7 +53,14 @@ public class OrderServiceImpl implements OrderService {
     private final ProductFeignClient productFeignClient;
     private final UserFeignClient userFeignClient;
 
+    /**
+     * 下单：跨服务写库（本服务写订单库 + 商品服务扣库存），用 Seata 保证一致性。
+     * <p>
+     * {@code @GlobalTransactional} 开启全局事务（本服务是 TM），
+     * {@code @Transactional} 保留作为本地分支事务（RM）；XID 由 FeignConfig 透传给下游。
+     */
     @Override
+    @GlobalTransactional(name = "create-order", rollbackFor = Exception.class)
     @Transactional(rollbackFor = Exception.class)
     public Long create(CreateOrderReq req) {
         // 0. 当前登录用户（网关透传的 X-User-Id 请求头）

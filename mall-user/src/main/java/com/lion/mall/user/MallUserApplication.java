@@ -1,8 +1,10 @@
 package com.lion.mall.user;
 
+import com.lion.mall.common.env.StartupEnvPrinter;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
+import org.springframework.context.ConfigurableApplicationContext;
 
 /**
  * 用户服务启动类
@@ -15,6 +17,8 @@ import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 public class MallUserApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(MallUserApplication.class, args);
+        ConfigurableApplicationContext ctx = SpringApplication.run(MallUserApplication.class, args);
+        // 打印当前环境摘要：端口 / 注册中心 / 数据库 / 缓存 / 事务 / 链路 / 日志 / 文档
+        StartupEnvPrinter.print(ctx.getEnvironment());
     }
 }

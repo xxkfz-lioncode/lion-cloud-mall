@@ -23,6 +23,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/user/register",
                         "/user/login",
+                        "/user/config/**",   // 配置中心验证接口（验证完连同 Controller 一起删）
                         "/doc.html",
                         "/swagger-ui/**",
                         "/swagger-ui.html",

@@ -1,20 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  SkyWalking 日志上报配置（Logback）
+  日志配置（Logback）
   ==========================================================================
-  1. CONSOLE：保留原有控制台输出（docker logs / IDEA 控制台都能看到）
-  2. SKYWALKING：通过 SkyWalking Agent 的 gRPC 通道把日志上报到 OAP，
-                 上报后才能在同版本 SkyWalking UI 的「Log」页签里查询
-  3. %tid：SkyWalking 提供的 traceId 占位符，把日志和链路绑定，
-           Trace 详情页可以直接跳到对应日志
+  1. CONSOLE   ：控制台输出（docker logs / IDEA 控制台都能看到）
+  2. FILE      ：落盘 {应用名}.log，按天 + 按大小（100MB）滚动并 gzip 压缩，
+                 保留 14 天、总量上限 5GB，避免把磁盘写满
+  3. ERROR_FILE：ERROR 单独一份（保留 30 天），便于告警与排查
+  4. SKYWALKING：通过 Agent 的 gRPC 通道上报 OAP，UI 的「Log」页签可查
+  5. %tid      ：SkyWalking 的 traceId 占位符，日志与链路绑定
+
+  落盘目录：
+    容器   ：LOG_PATH 环境变量（docker-compose.yml 里配 /app/logs，并挂载 ./logs）
+    本地   ：不配 LOG_PATH 时写到项目根目录的 logs/
+  文件名  ：{应用名}.log / {应用名}.yyyy-MM-dd.i.log.gz / {应用名}-error.log
 
   依赖：pom.xml 中的 apm-toolkit-logback-1.x（版本须与 Agent 版本一致）
   注意：上报能力依赖 -javaagent 挂载 SkyWalking Agent；
-       未挂 Agent 时（例如本地不挂 agent 裸跑）只会打印一行告警，不影响启动。
+       未挂 Agent 时（例如本地裸跑）只会打印一行告警，不影响启动。
   ==========================================================================
 -->
 <configuration>
-    <!-- 日志格式：[traceId] 便于链路与日志互查 -->
+    <!-- 应用名：取 spring.application.name，作为日志文件名前缀 -->
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="app"/>
+    <!-- 日志目录：容器里由 LOG_PATH 指定，本地默认写到项目根 logs/ -->
+    <property name="LOG_HOME" value="${LOG_PATH:-logs}"/>
     <property name="LOG_PATTERN"
               value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%tid] %logger{36} - %msg%n"/>
 
@@ -27,6 +36,61 @@
         </encoder>
     </appender>
 
+    <!-- 全量日志：按天切 + 按大小分片 + 压缩 + 保留策略 -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/${APP_NAME}.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/${APP_NAME}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>14</maxHistory>
+            <totalSizeCap>5GB</totalSizeCap>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+        </rollingPolicy>
+        <!-- 关闭每条立即刷盘，由缓冲区批量落盘，吞吐更好（进程崩溃可能丢最后几条） -->
+        <immediateFlush>false</immediateFlush>
+        <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
+            <layout class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.TraceIdPatternLogbackLayout">
+                <pattern>${LOG_PATTERN}</pattern>
+            </layout>
+        </encoder>
+    </appender>
+
+    <!-- ERROR 单独一份：保留 30 天 -->
+    <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>ERROR</level>
+        </filter>
+        <file>${LOG_HOME}/${APP_NAME}-error.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/${APP_NAME}-error.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+        </rollingPolicy>
+        <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
+            <layout class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.TraceIdPatternLogbackLayout">
+                <pattern>${LOG_PATTERN}</pattern>
+            </layout>
+        </encoder>
+    </appender>
+
+    <!--
+      可选：异步落盘（日志量极大时开启，避免磁盘 IO 阻塞业务线程）
+      注意：SkyWalking 的 %tid 取的是「当前线程」的链路上下文，异步线程里取不到，
+            开启后文件里的 TID 会变成 N/A。解决办法是在入口 Filter 里
+            MDC.put("tid", TraceContext.traceId()) 并把 pattern 改成 %X{tid}。
+      因此默认同步写盘 + immediateFlush=false；确需异步再放开下面这段，
+      并把 root 里的 ASYNC_FILE 注释打开。
+    -->
+    <!--
+    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <appender-ref ref="FILE"/>
+        <queueSize>1024</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+    </appender>
+    -->
+
     <!-- 上报 SkyWalking OAP（gRPC，地址复用 Agent 的 collector.backend_service） -->
     <appender name="SKYWALKING"
               class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.log.GRPCLogClientAppender">
@@ -37,13 +101,20 @@
         </encoder>
     </appender>
 
-    <!-- 框架/中间件日志只进控制台，避免刷爆 OAP（9.7 默认 H2 存储，容量有限） -->
+    <!-- 所有日志：控制台 + 文件（ERROR 额外进 error 文件） -->
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+        <appender-ref ref="ERROR_FILE"/>
     </root>
 
-    <!-- 业务日志：控制台 + 上报 OAP（additivity 默认为 true，会同时命中 root 的 CONSOLE） -->
+    <!-- 业务日志额外上报 OAP（additivity 默认 true，会同时命中 root 的 CONSOLE/FILE） -->
     <logger name="com.lion.mall" level="INFO">
+        <appender-ref ref="SKYWALKING"/>
+    </logger>
+
+    <!-- 网关侧 Seata 一般无日志；保留该 logger 便于排查 XID 透传问题 -->
+    <logger name="io.seata" level="INFO">
         <appender-ref ref="SKYWALKING"/>
     </logger>
 </configuration>

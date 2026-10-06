@@ -16,8 +16,21 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PWD:lion123}
       database: 0
+  # ---------------- 配置中心（Nacos）----------------
+  # 从 Nacos 拉取配置，优先级高于本地 application.yml；optional: 表示 Nacos 不可用时也不阻塞启动
+  config:
+    import:
+      - optional:nacos:${spring.application.name}.yaml   # 本服务私有配置：mall-order.yaml
+      - optional:nacos:mall-common.yaml                  # 公共配置（按需在 Nacos 上建）
   cloud:
     nacos:
+      config:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        group: DEFAULT_GROUP
+        file-extension: yaml
+        refresh-enabled: true          # 配置变更自动刷新（@ConfigurationProperties / @RefreshScope 立即生效）
+        username: nacos
+        password: nacos
       discovery:
         server-addr: ${NACOS_ADDR:127.0.0.1:8848}
     openfeign:
@@ -56,6 +69,27 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
     tags-sorter: alpha
+
+# ---------------- Seata 分布式事务（AT 模式） ----------------
+seata:
+  enabled: true
+  # 事务分组：参与同一个全局事务的服务必须一致（本服务是 TM，下单入口）
+  tx-service-group: mall_tx_group
+  # AT 模式：由 Seata 代理数据源，记录前后镜像，回滚时生成反向 SQL
+  data-source-proxy-mode: AT
+  service:
+    vgroup-mapping:
+      # 事务分组 -> TC 集群名（与 seata-server 的 seata.registry.nacos.cluster 对应）
+      mall_tx_group: default
+  registry:
+    # 注册中心用 Nacos，从 Nacos 发现 TC（seata-server）
+    type: nacos
+    nacos:
+      application: seata-server
+      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      group: SEATA_GROUP
+      username: nacos
+      password: nacos
 
 logging:
   level:

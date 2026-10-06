@@ -10,8 +10,21 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PWD:lion123}
       database: 0
+  # ---------------- 配置中心（Nacos）----------------
+  # 从 Nacos 拉取配置，优先级高于本地 application.yml；optional: 表示 Nacos 不可用时也不阻塞启动
+  config:
+    import:
+      - optional:nacos:${spring.application.name}.yaml   # 本服务私有配置：mall-gateway.yaml
+      - optional:nacos:mall-common.yaml                  # 公共配置（按需在 Nacos 上建）
   cloud:
     nacos:
+      config:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        group: DEFAULT_GROUP
+        file-extension: yaml
+        refresh-enabled: true          # 配置变更自动刷新（@ConfigurationProperties / @RefreshScope 立即生效）
+        username: nacos
+        password: nacos
       discovery:
         server-addr: ${NACOS_ADDR:127.0.0.1:8848}
     gateway:

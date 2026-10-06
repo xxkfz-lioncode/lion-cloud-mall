@@ -84,6 +84,13 @@ public class ProductServiceImpl implements ProductService {
         productMapper.deleteById(id);
     }
 
+    /**
+     * 扣减库存（Seata 全局事务中的一个分支 RM）
+     * <p>
+     * 双重保障：Redisson 分布式锁保证并发不超卖，Seata AT 保证订单回滚时库存也能回滚。
+     * 注意：AT 模式默认全局隔离级别是「读未提交」，这里的 Redis 锁会在分支事务提交前释放，
+     * 学习演示没问题；生产严谨场景建议把锁上移到订单侧，或使用 Seata 的 {@code @GlobalLock}。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deductStock(List<StockDeductDTO> items) {
