@@ -40,6 +40,8 @@
         <lombok.version>1.18.34</lombok.version>
         <!-- SkyWalking：日志上报工具包版本必须与 Agent（docker-compose 里的 9.7.0）一致 -->
         <skywalking.version>9.7.0</skywalking.version>
+        <!-- XXL-Job：分布式任务调度（订单超时关单）。版本需与 docker-compose 里的 admin 镜像一致 -->
+        <xxl-job.version>2.4.1</xxl-job.version>
     </properties>
 
     <!-- 依赖版本统一管理（BOM 导入） -->
@@ -120,6 +122,12 @@
                 <groupId>org.apache.skywalking</groupId>
                 <artifactId>apm-toolkit-logback-1.x</artifactId>
                 <version>${skywalking.version}</version>
+            </dependency>
+            <!-- XXL-Job 执行器（客户端），配合 xxl-job-admin 做分布式调度 -->
+            <dependency>
+                <groupId>com.xuxueli</groupId>
+                <artifactId>xxl-job-core</artifactId>
+                <version>${xxl-job.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

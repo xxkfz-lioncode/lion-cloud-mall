@@ -126,6 +126,25 @@ services:
     networks:
       - mall-net
 
+  # ---------------- XXL-Job 调度中心（admin）----------------
+  # 控制台：http://localhost:8082/xxl-job-admin   账号 admin / 123456
+  # 库表由 docker/mysql/init/03-xxl-job-schema.sql 在 MySQL 首次启动时自动创建
+  xxl-job-admin:
+    image: xuxueli/xxl-job-admin:2.4.1
+    container_name: mall-xxl-job-admin
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      # PARAMS：官方镜像通过命令行参数注入 Spring 配置（比环境变量更稳妥、不易因版本差异失效）
+      PARAMS: "--spring.datasource.url=jdbc:mysql://mysql:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true --spring.datasource.username=root --spring.datasource.password=root --xxl.job.accessToken=default_token"
+    ports:
+      - "8082:8080"   # 控制台（8080 已给网关、8081 已给 SkyWalking UI）
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - mall-net
+
   # ---------------- 微服务 ----------------
   mall-gateway:
     build:
@@ -244,6 +263,8 @@ services:
       MYSQL_PWD: root
       REDIS_HOST: redis
       REDIS_PWD: lion123
+      # XXL-Job 调度中心：容器网络内用服务名（容器内端口 8080，宿主机映射为 8082）
+      XXL_JOB_ADMIN: http://xxl-job-admin:8080/xxl-job-admin
       SW_AGENT_COLLECTOR_BACKEND_SERVICES: skywalking-oap:11800
       # 日志文件落盘目录（见各服务 logback-spring.xml）
       LOG_PATH: /app/logs
@@ -263,6 +284,8 @@ services:
       skywalking-oap:
         condition: service_started
       seata-server:
+        condition: service_started
+      xxl-job-admin:
         condition: service_started
     restart: unless-stopped
     networks:

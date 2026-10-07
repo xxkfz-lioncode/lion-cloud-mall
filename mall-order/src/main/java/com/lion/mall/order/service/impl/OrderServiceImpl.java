@@ -1,6 +1,7 @@
 package com.lion.mall.order.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.lion.mall.api.dto.ProductDTO;
 import com.lion.mall.api.dto.StockDeductDTO;
@@ -168,12 +169,17 @@ public class OrderServiceImpl implements OrderService {
         if (!OrderStatus.WAIT_PAY.getCode().equals(order.getStatus())) {
             throw new BizException(ResultCode.ORDER_STATUS_ERROR.getCode(), "只有待支付订单可以支付");
         }
-        Order update = new Order();
-        update.setId(order.getId());
-        update.setStatus(OrderStatus.PAID.getCode());
-        update.setPayTime(LocalDateTime.now());
-        update.setUpdateTime(LocalDateTime.now());
-        orderMapper.updateById(update);
+        // CAS 更新：只有「待支付」才能变成「已支付」。
+        // 与超时关单任务并发时，靠数据库条件更新互斥，防止订单既被支付又被关单。
+        LambdaUpdateWrapper<Order> uw = new LambdaUpdateWrapper<Order>()
+                .eq(Order::getId, order.getId())
+                .eq(Order::getStatus, OrderStatus.WAIT_PAY.getCode())
+                .set(Order::getStatus, OrderStatus.PAID.getCode())
+                .set(Order::getPayTime, LocalDateTime.now())
+                .set(Order::getUpdateTime, LocalDateTime.now());
+        if (orderMapper.update(null, uw) == 0) {
+            throw new BizException(ResultCode.ORDER_STATUS_ERROR.getCode(), "订单状态已变更，请刷新后重试");
+        }
     }
 
     @Override
@@ -183,13 +189,59 @@ public class OrderServiceImpl implements OrderService {
         if (!OrderStatus.WAIT_PAY.getCode().equals(order.getStatus())) {
             throw new BizException(ResultCode.ORDER_STATUS_ERROR.getCode(), "只有待支付订单可以取消");
         }
+        doCancel(order, "用户主动取消");
+    }
 
-        // 1. 修改订单状态
-        Order update = new Order();
-        update.setId(order.getId());
-        update.setStatus(OrderStatus.CANCELED.getCode());
-        update.setUpdateTime(LocalDateTime.now());
-        orderMapper.updateById(update);
+    @Override
+    public List<Long> findTimeoutOrderIds(int timeoutMinutes, int limit, int shardTotal, int shardIndex) {
+        LocalDateTime deadline = LocalDateTime.now().minusMinutes(timeoutMinutes);
+        LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<Order>()
+                .select(Order::getId)
+                .eq(Order::getStatus, OrderStatus.WAIT_PAY.getCode())
+                .lt(Order::getCreateTime, deadline)
+                .orderByAsc(Order::getCreateTime);
+        // 分片广播：多实例部署时每个实例只扫自己那一片（id % shardTotal = shardIndex），
+        // 天然不重复；单实例时 shardTotal=1，条件不生效，无副作用。
+        if (shardTotal > 1) {
+            // {0}/{1} 是 MyBatis-Plus 的参数占位符，值会被预编译绑定，无注入风险
+            wrapper.apply("id % {0} = {1}", shardTotal, shardIndex);
+        }
+        // limit 为外部传入的 int，Math.max 保证为正整数，不存在注入风险
+        wrapper.last("LIMIT " + Math.max(limit, 1));
+        return orderMapper.selectList(wrapper).stream().map(Order::getId).toList();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void closeTimeoutOrder(Long orderId) {
+        Order order = orderMapper.selectById(orderId);
+        // 幂等 + 防并发：扫描后可能已被支付或取消，这里再次校验状态，非待支付直接跳过
+        if (order == null || !OrderStatus.WAIT_PAY.getCode().equals(order.getStatus())) {
+            return;
+        }
+        doCancel(order, "超时未支付自动关闭");
+    }
+
+    /**
+     * 关单核心逻辑：状态置为「已取消」+ 远程回滚库存。
+     * <p>
+     * 被「用户主动取消」与「定时任务超时关单」共用，<b>不含用户校验</b>；
+     * 事务由调用方（cancel / closeTimeoutOrder）控制。
+     */
+    private void doCancel(Order order, String reason) {
+        // 1. CAS 更新状态：只有「待支付」才能被关单。
+        //    并发/多实例下由数据库条件更新互斥，抢不到的直接返回，
+        //    绝不执行下面的库存回滚 —— 否则同一订单的库存会被回滚两次。
+        LambdaUpdateWrapper<Order> uw = new LambdaUpdateWrapper<Order>()
+                .eq(Order::getId, order.getId())
+                .eq(Order::getStatus, OrderStatus.WAIT_PAY.getCode())
+                .set(Order::getStatus, OrderStatus.CANCELED.getCode())
+                .set(Order::getUpdateTime, LocalDateTime.now());
+        if (orderMapper.update(null, uw) == 0) {
+            // 期间已被支付或已取消：跳过，不回滚库存
+            log.warn("订单已非待支付状态，跳过关单：orderNo={}, reason={}", order.getOrderNo(), reason);
+            return;
+        }
 
         // 2. 远程调用商品服务回滚库存
         List<StockDeductDTO> restoreList = orderItemMapper.selectList(
@@ -203,6 +255,8 @@ public class OrderServiceImpl implements OrderService {
                 })
                 .toList();
         productFeignClient.restoreStock(restoreList);
+
+        log.info("订单已关闭：orderNo={}, reason={}", order.getOrderNo(), reason);
     }
 
     /** 查询订单，不存在或不属于当前用户则抛异常 */

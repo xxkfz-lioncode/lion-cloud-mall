@@ -91,6 +91,25 @@ seata:
       username: nacos
       password: nacos
 
+# ---------------- XXL-Job 分布式任务调度 ----------------
+xxl:
+  job:
+    admin:
+      # 调度中心地址：
+      #   容器部署 → 由环境变量 XXL_JOB_ADMIN 覆盖为服务名访问（见 docker-compose.yml）
+      #   本地 IDEA 跑 → 用宿主机映射端口 8082
+      addresses: ${XXL_JOB_ADMIN:http://127.0.0.1:8082/xxl-job-admin}
+    # 必须与调度中心的 accessToken 一致，否则调度会被拒绝
+    access-token: ${XXL_JOB_TOKEN:default_token}
+    executor:
+      # AppName：必须与 admin 后台「执行器管理」一致（建表脚本已预置 mall-order-executor）
+      appname: ${XXL_JOB_APPNAME:mall-order-executor}
+      # ip 留空 = 自动探测（容器里即容器 IP，与 admin 同网络可互通）
+      ip:
+      port: 9999
+      logpath: /app/logs/xxl-job
+      logretentiondays: 7
+
 logging:
   level:
     com.lion.mall: debug
