@@ -33,7 +33,7 @@ seata:
     type: nacos
     nacos:
       application: seata-server        # 客户端 seata.registry.nacos.application 要与此一致
-      server-addr: nacos:8848          # docker-compose-infra.yml 中改为 nacos:8848 亦可（同一网络）
+      server-addr: nacos:8848          # 容器网络内的服务名（微服务与 TC 同处 mall-net）
       group: SEATA_GROUP
       namespace: ""
       username: nacos

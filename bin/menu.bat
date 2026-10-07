@@ -9,7 +9,7 @@ echo ============================================
 echo            lion-cloud-mall 运维菜单
 echo ============================================
 echo   1  一键启动（打包 + 全栈启动）
-echo   2  只启动基础设施（MySQL / Redis / Nacos）
+echo   2  只启动中间件（MySQL / Redis / Nacos / SkyWalking / Seata）
 echo   3  打包
 echo   4  查看容器状态
 echo   5  查看实时日志

@@ -40,7 +40,7 @@ lion-cloud-mall
 ├── mall-order         # 订单服务   :8103   库 mall_order
 ├── mall-frontend      # 前端       :5173(开发) / :80(容器)
 ├── docker             # MySQL 初始化脚本、Nacos 配置示例
-└── docker-compose.yml # 一键编排（MySQL / Redis / Nacos / 各微服务 / 前端）
+└── docker-compose.yml # 全栈一键编排（中间件 + 微服务 + 前端，唯一入口）
 ```
 
 各服务端口与接口文档：
@@ -95,8 +95,8 @@ docker compose logs -f mall-gateway
 ### 方式二：本地开发（中间件用 Docker，服务本地启动）
 
 ```bash
-# 1. 只启动中间件（专用基础设施编排文件，详见下一节）
-docker compose -f docker-compose-infra.yml up -d
+# 1. 只启动中间件（不启业务服务，中间件在容器、服务在 IDEA 里跑）
+docker compose up -d mysql redis nacos skywalking-oap skywalking-ui seata-server
 
 # 2. 依次启动服务（也可在 IDEA 中直接运行启动类）
 mvn -pl mall-gateway -am spring-boot:run
@@ -116,8 +116,10 @@ npm run dev
 
 ### 基础设施编排（Windows 本地开发推荐）
 
-根目录的 `docker-compose-infra.yml` 只包含 MySQL / Redis / Nacos，不含业务服务，
-适合本地用 IDEA 跑服务、中间件放容器的开发方式。
+现在只有一份 `docker-compose.yml`（全栈编排）。若只想启动中间件（服务在 IDEA 里跑），
+用服务名单独指定即可，`bin\start-infra.bat` 已封装该命令：
+
+`docker compose up -d mysql redis nacos skywalking-oap skywalking-ui seata-server`
 
 | 组件 | 地址 | 账号 | 说明 |
 | --- | --- | --- | --- |
@@ -131,23 +133,23 @@ npm run dev
 
 ```powershell
 # 后台启动（首次会拉取镜像，Nacos 完全就绪约需 1~2 分钟）
-docker compose -f docker-compose-infra.yml up -d
+docker compose up -d mysql redis nacos skywalking-oap skywalking-ui seata-server
 
 # 查看容器状态（healthy 表示可用）
-docker compose -f docker-compose-infra.yml ps
+docker compose ps
 
 # 实时看某个组件日志
-docker compose -f docker-compose-infra.yml logs -f nacos
+docker compose logs -f nacos
 
 # 停止 / 启动（保留数据）
-docker compose -f docker-compose-infra.yml stop
-docker compose -f docker-compose-infra.yml start
+docker compose stop
+docker compose start
 
 # 删除容器（保留数据卷）
-docker compose -f docker-compose-infra.yml down
+docker compose down
 
 # 彻底重置（删除数据卷，下次启动会重新初始化数据库）
-docker compose -f docker-compose-infra.yml down -v
+docker compose down -v
 ```
 
 Windows 注意事项：
@@ -161,7 +163,7 @@ Windows 注意事项：
 
 #### Nacos 数据存储方式
 
-`docker-compose-infra.yml` 中的 Nacos 采用**外置 MySQL 持久化**（`SPRING_DATASOURCE_PLATFORM: mysql`），
+`docker-compose.yml` 中的 Nacos 采用**外置 MySQL 持久化**（`SPRING_DATASOURCE_PLATFORM: mysql`），
 配置与服务注册信息都落在 `nacos_config` 库中，方便直接查表观察。
 
 相关文件与变量：
@@ -186,7 +188,7 @@ docker exec -it mall-mysql mysql -uroot -proot -e "use nacos_config; show tables
 
 想改回**内置 Derby**（不依赖 MySQL）：删除 nacos 服务中的 `SPRING_DATASOURCE_PLATFORM`
 与全部 `MYSQL_SERVICE_*` 环境变量，并把挂载改回 `- nacos-data:/home/nacos/data`，然后
-`docker compose -f docker-compose-infra.yml up -d --force-recreate nacos`。
+`docker compose up -d --force-recreate nacos`。
 
 中间件起来后，用 IDEA 依次启动 `MallGatewayApplication` → `MallUserApplication` →
 `MallProductApplication` → `MallOrderApplication`，前端执行 `npm run dev` 即可。
@@ -253,10 +255,10 @@ SkyWalking 是 APM（应用性能监控）系统，提供**分布式链路追踪
 
 ### 8.1 启动服务端
 
-已写在 `docker-compose-infra.yml` 中，和其它中间件一起起来即可：
+已写在 `docker-compose.yml` 中，和其它中间件一起起来即可：
 
 ```powershell
-docker compose -f docker-compose-infra.yml up -d
+docker compose up -d mysql redis nacos skywalking-oap skywalking-ui seata-server
 ```
 
 | 组件 | 地址 | 说明 |
@@ -372,7 +374,7 @@ Java Agent 只上报**链路 + 指标**，业务日志必须由应用主动上�
 
 | 位置 | 改动 |
 | --- | --- |
-| `docker-compose.yml` / `docker-compose-infra.yml` | 新增 `seata-server` 服务（8091 业务端口 / 7091 控制台），业务服务 `depends_on` 它 |
+| `docker-compose.yml` | 新增 `seata-server` 服务（8091 业务端口 / 7091 控制台），业务服务 `depends_on` 它 |
 | `docker/seata/application.yml` | TC 配置：注册中心 Nacos、配置 file、存储 file |
 | `docker/mysql/init/01-schema.sql` | 三个业务库各建 `undo_log`（AT 模式回滚日志表） |
 | `mall-api` / `mall-user` / `mall-product` / `mall-order` pom | 引入 `seata-spring-boot-starter` |
@@ -408,10 +410,10 @@ bin\start-all.bat
 1. **版本必须对齐**：客户端 2.0.0 ↔ 服务端 2.0.0，不要单独升级其中一个。
 2. **`undo_log` 必须每个写库都建**：缺表会报 `Table 'xxx.undo_log' doesn't exist`。
    已初始化过数据卷的库不会重跑建表脚本，需手动执行或 `bin\reset.bat` 重建。
-3. **`SEATA_IP` 要选对**：
-   - 全容器化（`docker-compose.yml`）：`SEATA_IP: seata-server`，容器内用服务名访问；
-   - 服务在 IDEA 里跑（`docker-compose-infra.yml`）：`SEATA_IP: 127.0.0.1`，宿主机直连。
-   如果两边混用，把 `SEATA_IP` 改成**宿主机局域网 IP**（如 `192.168.1.100`）即可同时连通。
+3. **`SEATA_IP` 要选对**（TC 注册到 Nacos 的对外地址）：
+   - 全容器化（本项目默认方式）：`SEATA_IP: seata-server`，容器内按服务名访问，与宿主机 IP 无关；
+   - 服务在宿主机 / IDEA 里跑：改成 `127.0.0.1`（宿主机经端口映射直连）或宿主机局域网 IP。
+   填错的典型症状：宿主机日志刷 `can not connect to [172.x.x.x:8091]`。
 4. **数据源代理**：本项目单数据源 + HikariCP，Seata 会自动代理；若以后上多数据源，
    需要手动包 `io.seata.rm.datasource.DataSourceProxy`。
 5. **隔离级别**：AT 默认全局「读未提交」；`ProductServiceImpl#deductStock` 里的 Redisson 锁

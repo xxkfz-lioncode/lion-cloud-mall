@@ -1,9 +1,20 @@
 # ============================================================
-# lion-cloud-mall 一键编排
+# lion-cloud-mall 全栈编排（唯一入口）
+#
 # 使用方式：
 #   1) 先打包：mvn -DskipTests clean package
 #   2) 再启动：docker compose up -d --build
 #   3) 查看日志：docker compose logs -f mall-gateway
+#   4) 彻底重置（连数据一起清）：docker compose down -v
+#
+# 说明：
+#   本文件已合并原 docker-compose-infra.yml，现在只有这一份编排。
+#   全部组件（中间件 + 微服务 + 前端）都在同一 docker 网络 mall-net 内，
+#   互相用「服务名」通信，不依赖任何宿主机局域网 IP。
+#
+#   只想起中间件（服务在 IDEA 里跑）时，单独指定服务名即可：
+#     docker compose up -d mysql redis nacos skywalking-oap skywalking-ui seata-server
+#   （bin\start-infra.bat 已封装该命令）
 # ============================================================
 
 services:
@@ -11,9 +22,16 @@ services:
   mysql:
     image: mysql:8.0
     container_name: mall-mysql
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: root
       TZ: Asia/Shanghai
+      LANG: C.UTF-8
+    command:
+      # 字符集与时区（Windows 下避免中文乱码）
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_general_ci
+      --default-time-zone=+08:00
     ports:
       # 宿主机 3306 已被本机 MySQL 占用，映射到 3307（容器内仍是 3306）
       - "3307:3306"
@@ -31,6 +49,7 @@ services:
   redis:
     image: redis:7.2
     container_name: mall-redis
+    restart: unless-stopped
     command: ["redis-server", "--requirepass", "lion123", "--appendonly", "yes"]
     ports:
       - "6379:6379"
@@ -47,6 +66,7 @@ services:
   nacos:
     image: nacos/nacos-server:v2.3.2
     container_name: mall-nacos
+    restart: unless-stopped
     environment:
       MODE: standalone
       TZ: Asia/Shanghai
@@ -63,6 +83,10 @@ services:
       NACOS_AUTH_TOKEN: U2VjcmV0S2V5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkw
       NACOS_AUTH_IDENTITY_KEY: serverIdentity
       NACOS_AUTH_IDENTITY_VALUE: security
+      # JVM 调小一点，Windows 上更省内存
+      JVM_XMS: 512m
+      JVM_XMX: 512m
+      JVM_XMN: 256m
     depends_on:
       mysql:
         condition: service_healthy
@@ -78,18 +102,18 @@ services:
   # ---------------- Seata Server（TC：分布式事务协调者） ----------------
   # 版本与客户端一致（Spring Cloud Alibaba 2023.0.1.0 锁定 seata 2.0.0）
   # 控制台：http://localhost:7091  账号 seata / seata
+  #
+  # SEATA_IP：TC 注册到 Nacos 的「对外地址」。
+  #   全容器化（本文件）→ seata-server：同网络内按服务名访问，不依赖宿主机 IP。
+  #   若改回在宿主机 / IDEA 里跑服务，需改成宿主机可访问的地址
+  #   （127.0.0.1 或局域网 IP），否则注册出去的是容器内网 IP（如 172.20.0.x），宿主机连不上。
   seata-server:
     image: seataio/seata-server:2.0.0
     container_name: mall-seata
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      # 注册到 Nacos 的 TC 地址，按运行方式二选一：
-      #   全容器化（bin\start-all.bat 起 4 个服务）→ 可填 seata-server（容器内按服务名访问）
-      #   服务在 IDEA/宿主机跑 → 必须填宿主机局域网 IP（ipconfig 查看），
-      #                          否则注册出去的是容器内网 IP（如 172.20.0.4），宿主机连不上
-      #   混用（服务和容器同时在跑）→ 填宿主机局域网 IP，两边都能连通
-      SEATA_IP: 192.168.0.105
+      SEATA_IP: seata-server
       SEATA_PORT: 8091
     ports:
       - "8091:8091"   # RM / TM 连接 TC
@@ -120,7 +144,7 @@ services:
     volumes:
       # SkyWalking Agent：需先执行 docker/skywalking/download-agent.ps1 下载，
       # 未下载时会自动跳过 javaagent，不影响启动
-      - ./docker/skywalking/agent:/skywalking/agent:ro
+      - ./docker/skywalking/agent:/skywalking/agent
       # 日志挂卷：落到宿主机 ./logs（不挂的话写进容器可写层，容器重建即丢失）
       - ./logs:/app/logs
     ports:
@@ -150,7 +174,7 @@ services:
       # 日志文件落盘目录（见各服务 logback-spring.xml）
       LOG_PATH: /app/logs
     volumes:
-      - ./docker/skywalking/agent:/skywalking/agent:ro
+      - ./docker/skywalking/agent:/skywalking/agent
       # 日志挂卷：落到宿主机 ./logs（不挂的话写进容器可写层，容器重建即丢失）
       - ./logs:/app/logs
     ports:
@@ -187,7 +211,7 @@ services:
       # 日志文件落盘目录（见各服务 logback-spring.xml）
       LOG_PATH: /app/logs
     volumes:
-      - ./docker/skywalking/agent:/skywalking/agent:ro
+      - ./docker/skywalking/agent:/skywalking/agent
       # 日志挂卷：落到宿主机 ./logs（不挂的话写进容器可写层，容器重建即丢失）
       - ./logs:/app/logs
     ports:
@@ -224,7 +248,7 @@ services:
       # 日志文件落盘目录（见各服务 logback-spring.xml）
       LOG_PATH: /app/logs
     volumes:
-      - ./docker/skywalking/agent:/skywalking/agent:ro
+      - ./docker/skywalking/agent:/skywalking/agent
       # 日志挂卷：落到宿主机 ./logs（不挂的话写进容器可写层，容器重建即丢失）
       - ./logs:/app/logs
     ports:

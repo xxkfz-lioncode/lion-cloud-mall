@@ -14,7 +14,6 @@ if /i not "%OK%"=="y" (
 )
 
 docker compose down -v
-docker compose -f docker-compose-infra.yml down -v
 
 echo.
 echo 已重置。重新执行 start-all.bat 即可（MySQL 会重新执行建表脚本）
