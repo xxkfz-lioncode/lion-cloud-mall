@@ -18,6 +18,7 @@
         <module>mall-user</module>
         <module>mall-product</module>
         <module>mall-order</module>
+        <module>mall-demo</module>
     </modules>
 
     <properties>

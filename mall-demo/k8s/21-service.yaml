@@ -1,0 +1,27 @@
+# ============================================================
+# Service —— 给一组同类 Pod 提供稳定入口 + 自动负载均衡
+#
+# 学习点：
+#   1. 为什么需要 Service？Pod 会因为重建、扩缩容、滚动更新而 IP 变动且不可预测。
+#      Service 通过 selector 标签动态关联 Pod，对外暴露的 ClusterIP 则长期不变。
+#   2. 三种常用类型：
+#        ClusterIP（默认）：只在集群内可访问。适合 Redis、MySQL 这类纯内部依赖。
+#        NodePort        ：在每个节点开固定端口，外部用 <节点IP>:<端口> 访问。
+#        LoadBalancer    ：云厂商的负载均衡器（本地环境下效果接近 NodePort）。
+#   3. 负载均衡是由 kube-proxy 在 iptables/IPVS 层面做的，不是"代理服务"，
+#      所以没有额外性能损耗，也无法做按比例的灰度。
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: mall-demo
+  namespace: mall-demo
+spec:
+  type: NodePort        # 改成 ClusterIP 就变成纯内网服务
+  selector:
+    app: mall-demo      # ← 用标签选中后端 Pod，IP 变了会自动重新关联
+  ports:
+    - name: http
+      port: 8100        # Service 暴露的端口（集群内访问用这个）
+      targetPort: 8100  # 转发到容器的端口
+      nodePort: 30081   # 宿主机端口（NodePort 专属，取值范围必须 30000-32767）

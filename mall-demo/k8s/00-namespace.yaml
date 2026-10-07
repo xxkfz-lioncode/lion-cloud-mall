@@ -1,0 +1,16 @@
+# ============================================================
+# Namespace（命名空间）
+#
+# 学习点：
+#   1. Namespace 是 K8s 的"逻辑分组"，用来隔离环境（dev / test / prod）或不同用途的资源。
+#      注意：它只对"命名空间级资源"生效，Node、PV 这类是集群级资源，不受约束。
+#   2. 以下所有命令都要带 -n mall-demo，否则 kubectl 默认操作的是 default。
+#   3. 练完可以 `kubectl delete ns mall-demo` 一键清空，不留垃圾。
+# ============================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mall-demo
+  labels:
+    project: lion-cloud-mall
+    purpose: k8s-learning

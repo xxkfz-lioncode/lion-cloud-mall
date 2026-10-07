@@ -1,0 +1,41 @@
+server:
+  port: ${SERVER_PORT:8100}
+
+spring:
+  application:
+    name: mall-demo
+  # 注意：这里刻意不写 spring.config.import，也不配 Nacos，
+  # 让本模块保持零外部依赖，本地和容器里都能秒启动。
+
+# ---------------- 自定义演示配置 ----------------
+# K8s 里可通过 ConfigMap 注入环境变量 DEMO_MESSAGE 来覆盖它，
+# 用来演示"同一个镜像换一份配置就是另一套环境"。
+demo:
+  message: ${DEMO_MESSAGE:Hello from mall-demo}
+
+# ---------------- Actuator：给 K8s 探针用 ----------------
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,env
+  endpoint:
+    health:
+      # 开启 K8s 专用健康检查分组：
+      #   存活探针 -> /actuator/health/liveness
+      #   就绪探针 -> /actuator/health/readiness
+      probes:
+        enabled: true
+      show-details: always
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+
+logging:
+  level:
+    com.lion.mall: debug

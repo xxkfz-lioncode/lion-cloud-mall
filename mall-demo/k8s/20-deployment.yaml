@@ -1,0 +1,110 @@
+# ============================================================
+# Deployment —— 本项目的核心演练对象
+#
+# 学习点汇总（下面每一段都对应一个 K8s 核心概念，注释中有标记）：
+#   [A] replicas      ：期望副本数，K8s 会持续维持这个数量（自愈能力）
+#   [B] selector      ：Deployment 靠标签找到自己管理的 Pod
+#   [C] rollingUpdate ：滚动更新策略，实现零停机发布
+#   [D] Downward API  ：把 Pod 自身的元数据注入成环境变量
+#   [E] probes        ：就绪探针 / 存活探针，决定流量进出与容器生死
+#   [F] resources     ：requests 用于调度，limits 是硬上限（内存超限会被 OOMKill）
+#   [G] lifecycle     ：优雅停机，配合 /demo/slow 接口可以实际观察效果
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mall-demo
+  namespace: mall-demo
+  labels:
+    app: mall-demo
+spec:
+  # [A] 期望副本数 —— 练习时改这里再 apply，观察 Pod 的增减过程
+  replicas: 3
+
+  revisionHistoryLimit: 10      # 保留的历史 ReplicaSet 数量，用于回滚
+
+  # [C] 滚动更新策略：先起新的、再下旧的
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1               # 更新期间最多比期望副本多 1 个
+      maxUnavailable: 0         # 更新期间不允许出现不可用副本
+
+  # [B] 标签选择器：必须与下面 template.metadata.labels 完全一致，否则创建会报错
+  selector:
+    matchLabels:
+      app: mall-demo
+
+  template:
+    metadata:
+      labels:
+        app: mall-demo
+    spec:
+      # [G] 优雅停机：给 Pod 30 秒时间处理完存量请求
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: mall-demo
+          # 本地 docker build 出来的镜像，Docker Desktop 的 K8s 能直接看到
+          image: lion/mall-demo:1.0.0
+          imagePullPolicy: IfNotPresent   # 本地已有就别去远端拉
+          ports:
+            - name: http
+              containerPort: 8100
+
+          env:
+            # [D] Downward API：把 Pod 元数据注入成环境变量
+            # 应用层的 DemoController 用 @Value("${POD_NAME:local}") 读取，
+            # 请求 /demo/info 就能看到自己被调度到哪个 Pod 上。
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # 来自 ConfigMap 的配置
+            - name: DEMO_MESSAGE
+              valueFrom:
+                configMapKeyRef:
+                  name: mall-demo-config
+                  key: DEMO_MESSAGE
+
+          # [E] 探针：这里用 HTTP 方式打到 Actuator 的专用端点，
+          #     比简单的 tcpSocket 探针更准确（端口通了但应用卡死的情况能识别）
+          readinessProbe:        # 就绪探针：不通过则从 Service 摘除，不再接收流量
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8100
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:         # 存活探针：不通过则杀掉容器重启
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8100
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+
+          # [F] 资源配额
+          resources:
+            requests:           # 调度依据：节点要有这么多空闲资源才会被调度过去
+              cpu: 100m
+              memory: 256Mi
+            limits:             # 硬上限：内存超限会 OOMKill（Pod 状态显示 OOMKilled）
+              cpu: "1"
+              memory: 512Mi
+
+          # [G] preStop：收到删除指令后先睡 5 秒再退出，
+          #     给 kube-controller-manager 更新 iptables/ipvs 规则留出时间，
+          #     避免"规则还没摘干净流量就被切走"导致的 502。
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]

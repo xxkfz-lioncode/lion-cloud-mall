@@ -1,0 +1,19 @@
+# ============================================================
+# ConfigMap（配置映射）
+#
+# 学习点：
+#   1. 配置与镜像解耦：同一个镜像换一份 ConfigMap，就是另一套环境，不必重新打包。
+#   2. ConfigMap 是明文存储（连 base64 都不是），只放地址、端口、开关、文案这类非敏感信息。
+#   3. DEMO_MESSAGE 会被注入成环境变量，DemoController 里用 @Value("${demo.message}") 读取，
+#      application.yml 中写的是 ${DEMO_MESSAGE:Hello from mall-demo}，环境变量优先级更高所以会被覆盖。
+#   4. 【重要】环境变量方式注入的配置不会自动热更新，改完要重启 Pod 才生效。
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mall-demo-config
+  namespace: mall-demo
+data:
+  DEMO_MESSAGE: "Hello from K8s"
+  # 可以把日志级别也做出来，练习"改配置不用重打镜像"
+  LOG_LEVEL: "debug"
