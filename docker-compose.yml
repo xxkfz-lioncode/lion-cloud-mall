@@ -176,6 +176,9 @@ services:
     image: lion/mall-gateway:1.0.0
     container_name: mall-gateway
     environment:
+      # 时区：容器默认是 UTC，不设置的话 JVM 里 LocalDateTime.now() 拿到的是 UTC 时间，
+      # 存进库、返回给前端都会比北京时间少 8 小时。
+      TZ: Asia/Shanghai
       NACOS_ADDR: nacos:8848
       REDIS_HOST: redis
       REDIS_PWD: lion123
@@ -206,6 +209,9 @@ services:
     image: lion/mall-user:1.0.0
     container_name: mall-user
     environment:
+      # 时区：容器默认是 UTC，不设置的话 JVM 里 LocalDateTime.now() 拿到的是 UTC 时间，
+      # 存进库、返回给前端都会比北京时间少 8 小时。
+      TZ: Asia/Shanghai
       NACOS_ADDR: nacos:8848
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306          # 容器网络内使用 MySQL 容器自身端口
@@ -243,6 +249,9 @@ services:
     image: lion/mall-product:1.0.0
     container_name: mall-product
     environment:
+      # 时区：容器默认是 UTC，不设置的话 JVM 里 LocalDateTime.now() 拿到的是 UTC 时间，
+      # 存进库、返回给前端都会比北京时间少 8 小时。
+      TZ: Asia/Shanghai
       NACOS_ADDR: nacos:8848
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306          # 容器网络内使用 MySQL 容器自身端口
@@ -280,6 +289,9 @@ services:
     image: lion/mall-order:1.0.0
     container_name: mall-order
     environment:
+      # 时区：容器默认是 UTC，不设置的话 JVM 里 LocalDateTime.now() 拿到的是 UTC 时间，
+      # 存进库、返回给前端都会比北京时间少 8 小时。
+      TZ: Asia/Shanghai
       NACOS_ADDR: nacos:8848
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306          # 容器网络内使用 MySQL 容器自身端口
