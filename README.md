@@ -63,15 +63,41 @@ SkyWalking Agent      ⑧ 旁路：全程埋点，链路/拓扑/日志上报 OAP
 下单成功 → 待支付(0)
               ├── 用户支付   → 已支付(1)
               ├── 用户取消   → 已取消(2) + 回滚库存
-              └── 30分钟未付 → 已取消(2) + 回滚库存   ← XXL-Job 定时扫描
+              └── 30分钟未付 → 已取消(2) + 回滚库存   ← RabbitMQ 延迟消息（XXL-Job 兜底）
 ```
 
-超时关单用 **XXL-Job**：每分钟扫描一次「创建超过 30 分钟且仍待支付」的订单，
-逐单关单并远程回滚库存。两处防重复：
+### 超时关单：延迟消息为主，定时任务兜底
+
+下单成功即发一条 **RabbitMQ 延迟消息**（TTL = 30 分钟，用 TTL + 死信交换机实现，**无需插件**）：
+
+```
+下单成功
+   └─► order.delay.exchange ─► order.delay.queue   ← 无消费者，消息在这里等 30 分钟
+                                     │ TTL 到期，broker 自动投递
+                                     ▼
+                               order.close.exchange ─► order.close.queue ─► 关单消费者
+                                                                             （关单 + 回滚库存）
+```
+
+| | XXL-Job 轮询（旧） | RabbitMQ 延迟消息（现在） |
+| --- | --- | --- |
+| 触发精度 | 分钟级 | 毫秒级 |
+| 数据库压力 | 持续轮询扫描 | 零扫描 |
+
+**XXL-Job 保留为兜底**：每小时扫一次，处理 MQ 消息丢失、或服务宕机期间漏掉的订单。
+
+两条链路共用 `OrderService#closeTimeoutOrder`，靠两点保证只关一次：
 
 - **CAS 条件更新**：`UPDATE t_order SET status=2 WHERE id=? AND status=0`，
-  只有抢到更新的那个线程才回滚库存（防并发重复回滚）
-- **分片广播**：多实例部署时按 `id % 分片数` 各扫各的，不重复、可并行
+  只有抢到更新的线程才回滚库存（防并发重复回滚）
+- **手动 ack**：消费者处理成功才 `basicAck`，失败重新入队
+
+### 下单短信通知（异步解耦）
+
+下单主流程只往 `order.sms.queue` 丢一条消息就返回，**短信由消费者异步发送** ——
+短信服务的耗时和失败都不影响下单响应时间。
+
+消息在**事务提交后**才发送（挂 `afterCommit`），避免「事务回滚了、短信却已发出」。
 
 ---
 
@@ -88,7 +114,8 @@ SkyWalking Agent      ⑧ 旁路：全程埋点，链路/拓扑/日志上报 OAP
 | 缓存/锁 | Redis + Redisson | 防超卖 |
 | 持久层 | MyBatis-Plus + MySQL 8 | |
 | 分布式事务 | Seata 2.0.0（AT） | 跨服务一致性 |
-| 定时任务 | XXL-Job 2.4.1 | 超时关单 |
+| 消息队列 | RabbitMQ 3.13 | 超时关单延迟消息 + 下单短信通知 |
+| 定时任务 | XXL-Job 2.4.1 | 超时关单**兜底补偿**（每小时） |
 | 链路追踪 | SkyWalking 9.7.0 + Agent | 拓扑 / 链路 / 日志 |
 | 接口文档 | SpringDoc（OpenAPI 3） | |
 | 前端 | Vue3 + Vite + Element Plus + Pinia | |
@@ -125,7 +152,8 @@ Swagger：http://localhost:8101/swagger-ui.html （8102 / 8103 同理）
 | **OpenFeign** | 服务间调用 | `mall-api` 的 `feign` 包 | `FeignConfig` 拦截器透传 `satoken`、`X-User-Id`、`TX_XID` |
 | **Redisson** | 防超卖 | `ProductServiceImpl#deductStock` | 分布式锁 + `update ... where stock >= ?` 原子 SQL 双保险 |
 | **Seata** | 分布式事务 | `OrderServiceImpl#create` 加 `@GlobalTransactional` | 控制台 http://localhost:7091（`seata`/`seata`）；下单故意抛异常，验证订单与库存同时回滚 |
-| **XXL-Job** | 超时关单 | `OrderTimeoutJob` + `XxlJobConfig` | 控制台 http://localhost:8082/xxl-job-admin（`admin`/`123456`） |
+| **RabbitMQ** | 超时关单延迟消息 + 短信异步解耦 | `RabbitConfig`、`OrderMqProducer`、`OrderCloseConsumer`、`SmsNotifyConsumer` | 控制台 http://localhost:15672（`guest`/`guest`）；下单后看 `order.delay.queue` 是否有消息 |
+| **XXL-Job** | 超时关单**兜底**（每小时） | `OrderTimeoutJob` + `XxlJobConfig` | 控制台 http://localhost:8082/xxl-job-admin（`admin`/`123456`） |
 | **SkyWalking** | 链路追踪 | Agent 挂载，**不改业务代码** | UI http://localhost:8081；下单后看 Trace / Topology |
 
 ### 关于 XXL-Job
@@ -172,6 +200,7 @@ docker compose up -d mysql redis nacos seata-server xxl-job-admin skywalking-oap
 | Nacos | http://localhost:8848 | `nacos` / `nacos` |
 | Seata | 业务 `8091` / 控制台 http://localhost:7091 | `seata` / `seata` |
 | XXL-Job | http://localhost:8082/xxl-job-admin | `admin` / `123456` |
+| RabbitMQ | 控制台 http://localhost:15672（AMQP `5672`） | `guest` / `guest` |
 | SkyWalking | http://localhost:8081 | 无需登录 |
 
 ### 常用命令
@@ -224,7 +253,8 @@ docker compose down -v             # 彻底重置（会重新初始化数据库�
 | 登录态共享 | 登录后调 `/api/order/create` | 网关鉴权通过，order 能取到 userId |
 | 分布式事务 | 在 `create` 末尾临时 `throw new RuntimeException()` | `t_order` 不新增 **且** `t_product.stock` 回滚 |
 | 防超卖 | 并发下单同一商品 | 库存不会为负，多余请求报「库存不足」 |
-| 超时关单 | XXL-Job 控制台手动执行一次任务 | 30 分钟前的待支付订单被关，库存回滚 |
+| 超时关单（MQ） | 下单后看 RabbitMQ 控制台 `order.delay.queue` | 出现 1 条消息，到期自动流转到 `order.close.queue` 被消费，订单关闭 + 库存回滚 |
+| 短信通知（MQ） | 下单后看 `mall-order` 日志 | 出现「【短信通知】发送至 ...」 |
 | 链路追踪 | 下单后打开 http://localhost:8081 | Trace 显示 `gateway → order → user/product` 每一跳耗时 |
 | 业务日志 | SkyWalking UI → Log → 选 `mall-order` | 能看到「下单成功」等日志（含 traceId） |
 
@@ -254,11 +284,17 @@ docker compose down -v             # 彻底重置（会重新初始化数据库�
 10. 重新部署 order 必须 `docker compose up -d --build mall-order`，
     只 `up -d` 会复用旧镜像，代码不生效
 
+**RabbitMQ**
+11. 队列的 TTL / 死信配置**只在首次创建时生效** —— 改了 `order.timeout-minutes` 后，
+    需在控制台删掉 `order.delay.queue`（或删 RabbitMQ 数据卷）让队列重建
+12. 消费者是手动 ack：处理失败会重新入队；订单号这类坏消息直接丢弃，避免无限循环
+13. 消息挂在事务 `afterCommit` 之后发送，所以下单事务回滚时不会误发短信
+
 ---
 
 ## 十、可继续扩展的点
 
 - Sentinel 限流熔断（网关或 Feign 层）
 - 商品列表加 Redis 缓存 + 缓存穿透/击穿防护
-- 延迟消息（RabbitMQ 死信 / Redisson 延迟队列）替代轮询关单
+- 短信通知接入真实服务商（阿里云 / 腾讯云 SDK），替换 `SmsNotifyConsumer` 里的日志模拟
 - 订单分库分表、读写分离

@@ -19,6 +19,7 @@ import com.lion.mall.order.entity.Order;
 import com.lion.mall.order.entity.OrderItem;
 import com.lion.mall.order.mapper.OrderItemMapper;
 import com.lion.mall.order.mapper.OrderMapper;
+import com.lion.mall.order.mq.OrderMqProducer;
 import com.lion.mall.order.model.req.CreateOrderReq;
 import com.lion.mall.order.model.vo.OrderItemVO;
 import com.lion.mall.order.model.vo.OrderVO;
@@ -29,6 +30,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -53,6 +56,7 @@ public class OrderServiceImpl implements OrderService {
     private final OrderItemMapper orderItemMapper;
     private final ProductFeignClient productFeignClient;
     private final UserFeignClient userFeignClient;
+    private final OrderMqProducer mqProducer;
 
     /**
      * 下单：跨服务写库（本服务写订单库 + 商品服务扣库存），用 Seata 保证一致性。
@@ -138,7 +142,41 @@ public class OrderServiceImpl implements OrderService {
         });
 
         log.info("下单成功：orderNo={}, userId={}, amount={}", order.getOrderNo(), userId, totalAmount);
+
+        // 事务提交后再发 MQ 消息，避免「事务回滚了、消息却已经发出去」
+        sendMqAfterCommit(order.getId(), userId, order.getOrderNo(), totalAmount);
+
         return order.getId();
+    }
+
+    /**
+     * 事务提交后发送三条消息：
+     * <ol>
+     *   <li>超时关单延迟消息 → 30 分钟后触发关单检查</li>
+     *   <li>下单短信通知消息 → 异步发短信，不拖慢下单响应</li>
+     *   <li>WebSocket 推送消息 → 前端实时弹出「待支付」提示</li>
+     * </ol>
+     * <p>
+     * 为什么不直接发：消息一旦发出不可撤回。若下单事务随后回滚，
+     * 消费者就会拿到一个不存在的订单。挂在 afterCommit 上可消除这个时间窗口。
+     * 消费者端还会再校验一次订单状态，双保险。
+     */
+    private void sendMqAfterCommit(Long orderId, Long userId, String orderNo, BigDecimal amount) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            // 没有事务（如单元测试）时直接发送
+            mqProducer.sendTimeoutCheck(orderId);
+            mqProducer.sendSmsNotify(orderId);
+            mqProducer.pushOrderCreated(userId, orderNo, amount);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                mqProducer.sendTimeoutCheck(orderId);
+                mqProducer.sendSmsNotify(orderId);
+                mqProducer.pushOrderCreated(userId, orderNo, amount);
+            }
+        });
     }
 
     @Override
@@ -180,6 +218,8 @@ public class OrderServiceImpl implements OrderService {
         if (orderMapper.update(null, uw) == 0) {
             throw new BizException(ResultCode.ORDER_STATUS_ERROR.getCode(), "订单状态已变更，请刷新后重试");
         }
+        // 支付成功 → 实时推送通知给该用户的所有在线页面（区别于「待支付」的通知）
+        mqProducer.pushOrderPaid(order.getUserId(), order.getOrderNo(), order.getTotalAmount());
     }
 
     @Override

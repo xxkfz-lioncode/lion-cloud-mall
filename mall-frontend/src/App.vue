@@ -11,11 +11,15 @@
     <footer class="app-footer">
       Lion 商城 · Spring Cloud + Spring Cloud Alibaba 微服务学习演示
     </footer>
+
+    <!-- 后端 WebSocket 实时推送的订单通知（全局挂载，登录后才连接） -->
+    <NotifyToast />
   </div>
 </template>
 
 <script setup>
 import AppHeader from '@/components/AppHeader.vue'
+import NotifyToast from '@/components/NotifyToast.vue'
 </script>
 
 <style scoped>

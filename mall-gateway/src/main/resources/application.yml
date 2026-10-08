@@ -33,9 +33,15 @@ spring:
         locator:
           enabled: true
           lower-case-service-id: true
-      # 全局过滤器：去掉 /api 前缀后转发到具体服务
-      default-filters:
-        - DedupeResponseHeader=Vary Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_UNIQUE
+      # 全局过滤器
+      #
+      # 【重要】DedupeResponseHeader 绝对不能放在 default-filters 里！
+      #   它是"响应阶段"过滤器，会去改写响应头（response.getHeaders().put(...)）。
+      #   放在 default-filters 会作用于所有路由，包括 WebSocket 路由；
+      #   而 WebSocket 升级的响应是 101 Switching Protocols，其响应头是**只读**的，
+      #   put 会抛 UnsupportedOperationException，导致握手失败、连接被立即关闭。
+      #   所以这里把它下移到各个 HTTP 路由上，WebSocket 路由不带它。
+      #   （WebSocket 本身不受 CORS 约束，也不需要这个去重。）
       routes:
         - id: mall-user
           uri: lb://mall-user
@@ -43,18 +49,29 @@ spring:
             - Path=/api/user/**
           filters:
             - StripPrefix=1
+            - DedupeResponseHeader=Vary Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_UNIQUE
         - id: mall-product
           uri: lb://mall-product
           predicates:
             - Path=/api/product/**
           filters:
             - StripPrefix=1
+            - DedupeResponseHeader=Vary Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_UNIQUE
         - id: mall-order
           uri: lb://mall-order
           predicates:
             - Path=/api/order/**
           filters:
             - StripPrefix=1
+            - DedupeResponseHeader=Vary Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_UNIQUE
+        # WebSocket 推送：
+        #   ① uri 必须是 lb:ws://（不能写 lb://，否则握手会被当成普通 HTTP，升级失败）
+        #   ② 不能加 StripPrefix，后端端点路径就是 /ws/notify
+        #   ③ 不加 DedupeResponseHeader（原因见上面注释）
+        - id: mall-order-ws
+          uri: lb:ws://mall-order
+          predicates:
+            - Path=/ws/**
 
 # Sa-Token 配置（与各业务服务保持一致，保证 token 互通）
 sa-token:

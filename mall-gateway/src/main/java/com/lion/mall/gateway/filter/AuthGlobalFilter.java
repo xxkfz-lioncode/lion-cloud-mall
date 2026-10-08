@@ -79,6 +79,12 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         if (HttpMethod.OPTIONS.matches(method)) {
             return true;
         }
+        // WebSocket 握手：浏览器的 WebSocket API 不允许自定义请求头，
+        // 所以 token 只能拼在 URL 参数上（?token=xxx），本网关的 header 鉴权拿不到它。
+        // 鉴权下沉到 mall-order 的 WebSocket 端点里用 Sa-Token 完成，这里先放行握手。
+        if (path.startsWith("/ws/")) {
+            return true;
+        }
         // 登录、注册
         if (path.startsWith("/api/user/login") || path.startsWith("/api/user/register")) {
             return true;

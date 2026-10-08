@@ -17,6 +17,12 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true
+      },
+      // WebSocket 推送：ws: true 才能完成协议升级（否则握手拿到 200 而不是 101，连接会立刻断开）
+      '/ws': {
+        target: 'ws://localhost:8080',
+        changeOrigin: true,
+        ws: true
       }
     }
   }

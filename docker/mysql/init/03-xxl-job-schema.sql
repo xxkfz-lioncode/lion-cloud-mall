@@ -116,9 +116,11 @@ CREATE TABLE `xxl_job_lock` (
 -- 执行器：AppName 必须与 mall-order 里 xxl.job.executor.appname 完全一致（自动注册，无需手填地址）
 INSERT INTO `xxl_job_group`(`id`, `app_name`, `title`, `address_type`, `address_list`, `update_time`) VALUES (1, 'mall-order-executor', '订单服务执行器', 0, NULL, now());
 
--- 订单超时自动关单：每分钟扫描一次；executor_param = 超时分钟数（未支付超过该分钟数则关单并回滚库存）
+-- 订单超时自动关单（兜底补偿）：主链路已改为 RabbitMQ 延迟消息（下单时发 TTL=30 分钟的延迟消息，
+-- 到期精确触发关单，不扫库）。这里保留每小时扫一次做兜底，处理 MQ 消息丢失 / 服务宕机期间漏掉的订单。
+-- 两者都依赖 CAS 条件更新，同一订单只会被关一次。executor_param = 超时分钟数
 -- trigger_status=1：默认已启动（admin 启动后即开始调度，执行器注册上来后自动生效）
-INSERT INTO `xxl_job_info`(`id`, `job_group`, `job_desc`, `add_time`, `update_time`, `author`, `alarm_email`, `schedule_type`, `schedule_conf`, `misfire_strategy`, `executor_route_strategy`, `executor_handler`, `executor_param`, `executor_block_strategy`, `executor_timeout`, `executor_fail_retry_count`, `glue_type`, `glue_source`, `glue_remark`, `glue_updatetime`, `child_jobid`, `trigger_status`) VALUES (1, 1, '订单超时自动关单', now(), now(), 'lion', '', 'CRON', '0 0/1 * * * ?', 'DO_NOTHING', 'SHARDING_BROADCAST', 'orderTimeoutHandler', '30', 'SERIAL_EXECUTION', 0, 0, 'BEAN', '', '初始化', now(), '', 1);
+INSERT INTO `xxl_job_info`(`id`, `job_group`, `job_desc`, `add_time`, `update_time`, `author`, `alarm_email`, `schedule_type`, `schedule_conf`, `misfire_strategy`, `executor_route_strategy`, `executor_handler`, `executor_param`, `executor_block_strategy`, `executor_timeout`, `executor_fail_retry_count`, `glue_type`, `glue_source`, `glue_remark`, `glue_updatetime`, `child_jobid`, `trigger_status`) VALUES (1, 1, '订单超时自动关单', now(), now(), 'lion', '', 'CRON', '0 0 * * * ?', 'DO_NOTHING', 'SHARDING_BROADCAST', 'orderTimeoutHandler', '30', 'SERIAL_EXECUTION', 0, 0, 'BEAN', '', '初始化', now(), '', 1);
 
 -- 默认管理员：admin / 123456（密码为 md5 加密存储）
 INSERT INTO `xxl_job_user`(`id`, `username`, `password`, `role`, `permission`) VALUES (1, 'admin', 'e10adc3949ba59abbe56e057f20f883e', 1, NULL);

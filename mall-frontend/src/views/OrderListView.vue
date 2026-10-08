@@ -98,7 +98,7 @@ const loadOrders = async () => {
 /** 支付 */
 const handlePay = async order => {
   await payOrder(order.id)
-  ElMessage.success('支付成功')
+  // 支付结果同样由后端 WebSocket 推送，这里不重复提示
   loadOrders()
 }
 

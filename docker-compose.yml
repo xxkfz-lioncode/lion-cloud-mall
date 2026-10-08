@@ -145,6 +145,29 @@ services:
     networks:
       - mall-net
 
+  # ---------------- RabbitMQ 消息中间件 ----------------
+  # 控制台：http://localhost:15672   账号 guest / guest
+  # 用途：① 超时关单延迟消息（TTL + 死信交换机）② 下单成功短信通知（异步解耦）
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: mall-rabbitmq
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"     # AMQP 协议端口（服务连接用）
+      - "15672:15672"   # 管理控制台
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - mall-net
+
   # ---------------- 微服务 ----------------
   mall-gateway:
     build:
@@ -265,6 +288,8 @@ services:
       REDIS_PWD: lion123
       # XXL-Job 调度中心：容器网络内用服务名（容器内端口 8080，宿主机映射为 8082）
       XXL_JOB_ADMIN: http://xxl-job-admin:8080/xxl-job-admin
+      # RabbitMQ：容器网络内用服务名（本地 IDEA 跑时用默认的 127.0.0.1:5672）
+      RABBITMQ_HOST: rabbitmq
       SW_AGENT_COLLECTOR_BACKEND_SERVICES: skywalking-oap:11800
       # 日志文件落盘目录（见各服务 logback-spring.xml）
       LOG_PATH: /app/logs
@@ -287,6 +312,8 @@ services:
         condition: service_started
       xxl-job-admin:
         condition: service_started
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - mall-net

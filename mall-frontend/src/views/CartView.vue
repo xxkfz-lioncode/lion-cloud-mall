@@ -251,7 +251,8 @@ const handleSubmit = async () => {
         quantity: item.quantity
       }))
     })
-    ElMessage.success('下单成功')
+    // 不再在这里弹提示：下单结果由后端通过 WebSocket 统一推送（见 NotifyToast.vue）。
+    // 后端推送的好处是「跨标签页、跨实例」都能收到，且不依赖前端自己知道结果。
     cartStore.clear()
     dialogVisible.value = false
     router.push('/orders')

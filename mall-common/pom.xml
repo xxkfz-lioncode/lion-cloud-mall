@@ -37,6 +37,12 @@
             <version>${mybatis-plus.version}</version>
             <scope>provided</scope>
         </dependency>
+        <!-- Hutool 通用工具库：JSON、字符串、日期、加解密等。
+             放在 common 里，所有业务模块（api → common）都能直接用。 -->
+        <dependency>
+            <groupId>cn.hutool</groupId>
+            <artifactId>hutool-all</artifactId>
+        </dependency>
     </dependencies>
     <build>
         <plugins>

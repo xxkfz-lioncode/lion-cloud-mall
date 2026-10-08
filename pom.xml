@@ -42,6 +42,8 @@
         <skywalking.version>9.7.0</skywalking.version>
         <!-- XXL-Job：分布式任务调度（订单超时关单）。版本需与 docker-compose 里的 admin 镜像一致 -->
         <xxl-job.version>2.4.1</xxl-job.version>
+        <!-- Hutool：通用 Java 工具库（JSON、字符串、日期、加解密等） -->
+        <hutool.version>5.8.35</hutool.version>
     </properties>
 
     <!-- 依赖版本统一管理（BOM 导入） -->
@@ -128,6 +130,12 @@
                 <groupId>com.xuxueli</groupId>
                 <artifactId>xxl-job-core</artifactId>
                 <version>${xxl-job.version}</version>
+            </dependency>
+            <!-- Hutool 通用工具库 -->
+            <dependency>
+                <groupId>cn.hutool</groupId>
+                <artifactId>hutool-all</artifactId>
+                <version>${hutool.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

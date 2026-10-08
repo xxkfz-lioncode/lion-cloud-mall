@@ -106,10 +106,22 @@
             <artifactId>seata-spring-boot-starter</artifactId>
         </dependency>
 
-        <!-- XXL-Job 执行器：订单超时自动关单等定时任务 -->
+        <!-- XXL-Job 执行器：超时关单的兜底补偿（主链路已改为 RabbitMQ 延迟消息） -->
         <dependency>
             <groupId>com.xuxueli</groupId>
             <artifactId>xxl-job-core</artifactId>
+        </dependency>
+
+        <!-- RabbitMQ：超时关单延迟消息 + 下单短信通知 + WebSocket 推送广播 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
+
+        <!-- WebSocket：后端主动向前端推送订单状态通知 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
         </dependency>
     </dependencies>
 

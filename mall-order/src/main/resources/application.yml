@@ -16,6 +16,31 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PWD:lion123}
       database: 0
+  # ---------------- 消息队列（RabbitMQ）----------------
+  rabbitmq:
+    # 容器部署 → 由环境变量 RABBITMQ_HOST=rabbitmq 覆盖（见 docker-compose.yml）
+    host: ${RABBITMQ_HOST:127.0.0.1}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PWD:guest}
+    virtual-host: /
+    # 生产者确认：消息未到达交换机/队列时触发回调，便于排查发送失败
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        # 手动 ack：业务处理成功才确认，异常则重回队列（配合下面消费者里的 channel.basicNack）
+        acknowledge-mode: manual
+        prefetch: 10            # 限流：每次最多预取 10 条，避免堆积时压垮消费者
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1000ms
+
+  # 超时关单配置（延迟消息的 TTL 由此计算）
+  order:
+    timeout-minutes: ${ORDER_TIMEOUT_MINUTES:30}
+
   # ---------------- 配置中心（Nacos）----------------
   # 从 Nacos 拉取配置，优先级高于本地 application.yml；optional: 表示 Nacos 不可用时也不阻塞启动
   config:

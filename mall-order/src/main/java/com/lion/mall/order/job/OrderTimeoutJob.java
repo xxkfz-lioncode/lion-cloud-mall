@@ -10,7 +10,13 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * 订单超时自动关单任务
+ * 订单超时自动关单任务（<b>兜底补偿</b>）
+ * <p>
+ * <b>主链路已改为 RabbitMQ 延迟消息</b>（见 {@code com.lion.mall.order.mq.OrderCloseConsumer}）：
+ * 下单成功时发一条 TTL = 30 分钟的延迟消息，到期后由 broker 自动投递并精确关单，全程不扫库。
+ * <p>
+ * 本任务保留为<b>兜底</b>：每小时扫描一次，处理 MQ 消息丢失、或服务宕机期间漏掉的订单。
+ * 两条链路共用 {@code OrderService#closeTimeoutOrder}，内部 CAS 保证同一订单只会被关一次。
  * <p>
  * 扫描「待支付且创建时间已超过阈值」的订单，逐个关闭并回滚库存。
  * 每条订单一个独立事务，单条失败不影响其余订单。
