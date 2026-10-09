@@ -44,6 +44,8 @@
         <xxl-job.version>2.4.1</xxl-job.version>
         <!-- Hutool：通用 Java 工具库（JSON、字符串、日期、加解密等） -->
         <hutool.version>5.8.35</hutool.version>
+        <!-- Logstash JSON 日志编码器：把日志输出成 JSON 给 ELK 采集（避免 Logstash 里写 grok 正则） -->
+        <logstash-logback-encoder.version>7.4</logstash-logback-encoder.version>
     </properties>
 
     <!-- 依赖版本统一管理（BOM 导入） -->
@@ -136,6 +138,12 @@
                 <groupId>cn.hutool</groupId>
                 <artifactId>hutool-all</artifactId>
                 <version>${hutool.version}</version>
+            </dependency>
+            <!-- Logstash JSON 日志编码器（ELK） -->
+            <dependency>
+                <groupId>net.logstash.logback</groupId>
+                <artifactId>logstash-logback-encoder</artifactId>
+                <version>${logstash-logback-encoder.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

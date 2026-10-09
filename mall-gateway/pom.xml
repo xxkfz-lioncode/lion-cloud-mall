@@ -62,6 +62,14 @@
             <groupId>org.apache.skywalking</groupId>
             <artifactId>apm-toolkit-logback-1.x</artifactId>
         </dependency>
+
+        <!-- Logstash JSON 日志编码器（ELK）。
+             注意：这里单独引入，不能走 mall-common —— common 带 Servlet 栈的
+             spring-boot-starter-web，加进来会让 Gateway 从 WebFlux 退化成 Servlet 栈而启动失败。 -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

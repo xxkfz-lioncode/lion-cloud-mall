@@ -345,6 +345,95 @@ services:
     networks:
       - mall-net
 
+  # ---------------- ELK 日志平台 ----------------
+  # 访问：Kibana http://localhost:5601
+  # 链路：微服务 *.json.log → Filebeat → Logstash → Elasticsearch → Kibana
+  #
+  # ⚠ 版本：ES / Logstash / Kibana / Filebeat 必须完全一致，否则协议不兼容会连不上。
+  # ⚠ 内存：ES 512m + Logstash 256m + Kibana 512m ≈ 多占 1.3GB。
+  #    机器吃紧时可以把 Logstash 停掉，让 Filebeat 直连 ES（改 filebeat.yml 的 output 即可）。
+  # ⚠ 首次启动：ES 初始化较慢（60s 起），Kibana 完全可用约需 1~2 分钟，耐心等。
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: mall-elasticsearch
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      # 单节点模式：学习环境够用（生产要组集群）
+      discovery.type: single-node
+      # 关闭安全认证：8.x 默认开启，不关的话 Kibana / Filebeat 连接都要配账号密码和 TLS 证书，
+      # 学习环境没必要，开了反而一堆连不上的坑
+      xpack.security.enabled: "false"
+      xpack.security.enrollment.enabled: "false"
+      # 默认占 1GB+，这里压到最小可用值
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    networks:
+      - mall-net
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.13.4
+    container_name: mall-logstash
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      LS_JAVA_OPTS: "-Xms256m -Xmx256m"
+    volumes:
+      # pipeline 目录：里面放 logstash.conf（改完重启容器生效）
+      - ./docker/elk/logstash/pipeline:/usr/share/logstash/pipeline:ro
+    ports:
+      - "5044:5044"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - mall-net
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.13.4
+    container_name: mall-kibana
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      # 界面中文
+      I18N_LOCALE: zh-CN
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - mall-net
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.13.4
+    container_name: mall-filebeat
+    restart: unless-stopped
+    # 要读宿主机挂载进来的日志目录，权限需足够
+    user: root
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      # 与各微服务共享同一个日志目录（只读，避免误写）
+      - ./logs:/var/log/mall:ro
+      - ./docker/elk/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      # 读取位置记录：挂卷保证容器重建后不重复采集
+      - filebeat-data:/usr/share/filebeat/data
+    depends_on:
+      - logstash
+    networks:
+      - mall-net
+
   # ---------------- SkyWalking（APM：链路追踪 + 服务拓扑 + 性能指标） ----------------
   # 版本 9.7.0，存储为内置 H2，无需 Elasticsearch / BanyanDB。
   # 注意：10.2.0 起官方默认存储改为 BanyanDB，升级版本需一并调整 SW_STORAGE。
@@ -387,3 +476,6 @@ volumes:
   redis-data:
   nacos-data:
   skywalking-data:
+  # ELK：ES 索引数据 + Filebeat 读取位置（不挂的话容器重建会重复采集日志）
+  elasticsearch-data:
+  filebeat-data:

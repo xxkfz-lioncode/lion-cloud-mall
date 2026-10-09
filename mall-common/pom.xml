@@ -43,6 +43,13 @@
             <groupId>cn.hutool</groupId>
             <artifactId>hutool-all</artifactId>
         </dependency>
+        <!-- Logstash JSON 日志编码器（ELK）：
+             各服务的 logback-spring.xml 用它把日志输出成 JSON，供 Filebeat 采集。
+             放在 common 里，user / product / order / gateway 都能直接用。 -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+        </dependency>
     </dependencies>
     <build>
         <plugins>

@@ -1,0 +1,39 @@
+# ============================================================
+# Filebeat 配置（ELK 采集端）
+#   读取各微服务落盘的 JSON 日志 → 送给 Logstash
+#   日志目录由 docker-compose 挂载：宿主机 ./logs -> 容器 /var/log/mall
+#
+#   为什么用 Filebeat 采文件，而不是让 Logback 直接发 TCP 给 Logstash：
+#     日志先落盘再采集，等于多了一层缓冲 —— Logstash 挂了、网络抖了，
+#     日志还在文件里，恢复后继续传，不会丢，也不会阻塞业务线程。
+# ============================================================
+
+filebeat.inputs:
+  - type: filestream
+    id: mall-json-logs
+    enabled: true
+    paths:
+      # 只采集 JSON 日志
+      # 纯文本的 {应用名}.log 是留给 docker logs / 本地人肉排查的，不进 ELK
+      - /var/log/mall/*.json.log
+
+    # 日志本身就是 JSON（LogstashEncoder 输出），直接展开成顶层字段，
+    # 这样 Logstash 里就不用写 grok 正则了（正则一旦日志格式微调就全崩）
+    parsers:
+      - ndjson:
+          overwrite_keys: true
+          add_error_key: true
+          message_key: message
+
+    fields:
+      log_source: mall
+    fields_under_root: true
+
+# 断点续传的读取位置记录（挂了 volume，容器重建不会重复采集）
+path.data: /usr/share/filebeat/data
+
+output.logstash:
+  hosts: ["logstash:5044"]
+
+logging.level: info
+logging.to_files: false

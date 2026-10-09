@@ -201,12 +201,20 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void pay(Long id) {
         Order order = getOrder(id);
         if (!OrderStatus.WAIT_PAY.getCode().equals(order.getStatus())) {
             throw new BizException(ResultCode.ORDER_STATUS_ERROR.getCode(), "只有待支付订单可以支付");
         }
+        markPaid(order);
+    }
+
+    /**
+     * 置为「已支付」。<b>幂等</b>：已经是终态时直接返回，不重复推送通知。
+     *
+     * @param order 订单
+     */
+    private void markPaid(Order order) {
         // CAS 更新：只有「待支付」才能变成「已支付」。
         // 与超时关单任务并发时，靠数据库条件更新互斥，防止订单既被支付又被关单。
         LambdaUpdateWrapper<Order> uw = new LambdaUpdateWrapper<Order>()
@@ -216,8 +224,11 @@ public class OrderServiceImpl implements OrderService {
                 .set(Order::getPayTime, LocalDateTime.now())
                 .set(Order::getUpdateTime, LocalDateTime.now());
         if (orderMapper.update(null, uw) == 0) {
-            throw new BizException(ResultCode.ORDER_STATUS_ERROR.getCode(), "订单状态已变更，请刷新后重试");
+            // 抢不到说明已被别的线程（用户重复点击 / 超时关单任务）改过
+            log.info("订单已非待支付状态，跳过支付标记：orderNo={}", order.getOrderNo());
+            return;
         }
+        log.info("订单支付成功：orderNo={}", order.getOrderNo());
         // 支付成功 → 实时推送通知给该用户的所有在线页面（区别于「待支付」的通知）
         mqProducer.pushOrderPaid(order.getUserId(), order.getOrderNo(), order.getTotalAmount());
     }

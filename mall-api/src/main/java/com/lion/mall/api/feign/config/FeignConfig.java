@@ -1,9 +1,11 @@
 package com.lion.mall.api.feign.config;
 
 import com.lion.mall.common.constant.Constants;
+import com.lion.mall.common.context.TraceIdContext;
 import feign.RequestInterceptor;
 import io.seata.core.context.RootContext;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -34,6 +36,30 @@ public class FeignConfig {
             String xid = RootContext.getXID();
             if (xid != null && !xid.isBlank()) {
                 template.header(RootContext.KEY_XID, xid);
+            }
+        };
+    }
+
+    /**
+     * 透传链路追踪 ID（请求头 X-Trace-Id）
+     * <p>
+     * Feign 调用是全新的 HTTP 请求，下游服务的 ThreadLocal / MDC 不会自动带过去。
+     * 没有这一步的话，一次「下单」请求在 order 服务和 product 服务里会是两个不同的
+     * traceId，Kibana 里就没法把整条链路的日志串起来看了。
+     * <p>
+     * 取值顺序：优先 ThreadLocal（{@code TraceIdFilter} 写入），
+     * 再退化到 MDC —— 因为定时任务、MQ 消费者等场景没有经过 Filter，
+     * 但可能别处手动往 MDC 塞过 traceId。
+     */
+    @Bean
+    public RequestInterceptor traceIdInterceptor() {
+        return template -> {
+            String traceId = TraceIdContext.get();
+            if (traceId == null || traceId.isBlank()) {
+                traceId = MDC.get(Constants.MDC_TRACE_ID);
+            }
+            if (traceId != null && !traceId.isBlank()) {
+                template.header(Constants.HEADER_TRACE_ID, traceId);
             }
         };
     }

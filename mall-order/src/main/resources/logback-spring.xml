@@ -91,6 +91,35 @@
     </appender>
     -->
 
+    <!--
+      JSON 日志（给 ELK 采集用）：Filebeat → Logstash → Elasticsearch → Kibana
+      为什么单独再写一份，而不是把上面的 FILE 直接改成 JSON：
+        JSON 人眼几乎没法读，而 {应用名}.log 是给 docker logs / 本地排查用的，
+        所以保留纯文本那份，这份 .json.log 只给机器读。
+    -->
+    <appender name="FILE_JSON" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/${APP_NAME}.json.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/${APP_NAME}.json.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <!-- 日志已经进 ES 了，磁盘上不用留太久，7 天足够兜底 -->
+            <maxHistory>7</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+        </rollingPolicy>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <!-- 服务名：Kibana 里按 service 字段区分是哪个服务打的日志 -->
+            <customFields>{"service":"${APP_NAME}"}</customFields>
+            <!-- 把 MDC 里的 traceId 提升到 JSON 顶层，Kibana 里可直接聚合/检索 -->
+            <includeMdcKeyName>traceId</includeMdcKeyName>
+            <!-- 丢掉 ELK 里用不到的字段，省存储 -->
+            <fieldNames>
+                <version>[ignore]</version>
+                <levelValue>[ignore]</levelValue>
+            </fieldNames>
+        </encoder>
+    </appender>
+
     <!-- 上报 SkyWalking OAP（gRPC，地址复用 Agent 的 collector.backend_service） -->
     <appender name="SKYWALKING"
               class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.log.GRPCLogClientAppender">
@@ -105,6 +134,7 @@
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>
+        <appender-ref ref="FILE_JSON"/>
         <appender-ref ref="ERROR_FILE"/>
     </root>
 
